@@ -19,7 +19,7 @@ from collections import defaultdict
 from tqdm import tqdm
 import itertools
 from flights import Flight, Flights
-
+import gc
 class DataPreparation:
     def __init__(self, fixed_columns=None, prefix='_Tmin_', mean_threshold=0.1, var_threshold=0.1):
 
@@ -146,8 +146,9 @@ class DataPreparation:
     def _separate_features(self, X):
 
         # Identify time-varying columns based on prefix and exclude CBAS columns
-        skip = ['CBAS', 'cbas', 'eobt', 'atot']
-        time_varying_columns = [col for col in X.columns if self.prefix in col and col not in skip]
+        skip = ['CBAS', 'cbas', 'eobt', 'atot', 'wspeed', 'wdirec','wguts']
+        print(f'{skip=}')
+        time_varying_columns = [col for col in X.columns if self.prefix in col and col not in skip and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col]
         unique_values_after_prefix = set([col.split(self.prefix)[1] for col in time_varying_columns])
         horizons = sorted(unique_values_after_prefix, key=int)
         # Identify CBAS columns (if any)
@@ -155,7 +156,7 @@ class DataPreparation:
 
         # Keep fixed columns consistent with the ones used during training
         if not self.fixed_columns:
-            self.fixed_columns = [col for col in X.columns if col not in time_varying_columns and col not in skip]
+            self.fixed_columns = [col for col in X.columns if col not in time_varying_columns and col not in skip and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col]
 
         X_fixed = X[self.fixed_columns].copy()  # shape: (N, num_fixed_features)
         return time_varying_columns, time_CBAS_columns, X_fixed, horizons
@@ -647,7 +648,7 @@ def process_flight_manager(file_path, start_date, end_date, taf_reports=None, re
     return new_flights, totalcount, usecount
 
 
-def get_efd_rf(archive, start_date, end_date, taf_reports=None, reg_reports=None, reload=False, temppath=r"C:\Users\iLabs_6\Documents\Tex\allwithCBAS\tempefd"):
+def get_efd_rf(archive, start_date, end_date, taf_reports=None, reg_reports=None, reload=False, temppath=r"C:\Users\iLabs_6\Documents\Tex\realtimetest2\tempefd"):
     # print(f'tafreports = {taf_reports}')
 
     all_flights = {}
@@ -662,6 +663,7 @@ def get_efd_rf(archive, start_date, end_date, taf_reports=None, reg_reports=None
     for i, file in enumerate(tqdm(files)):
         if not 'chunk' in file:
             continue
+        print(f'{i=}  {file=}')
         file_path = os.path.join(archive, file)
         
         file_new, totalcount, usecount = process_flight_manager(file_path, start_date, end_date, taf_reports, reg_reports)

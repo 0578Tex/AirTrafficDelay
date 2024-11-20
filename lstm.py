@@ -386,7 +386,7 @@ class LSTMModelTrainerAttention:
             running_train_loss = 0.0
 
             # Determine current max_shift based on epoch
-            current_max_shift =0
+            current_max_shift =2
             print(f"Epoch {epoch+1}: Current max_shift = {current_max_shift}")
 
             # Training loop
@@ -530,7 +530,7 @@ class LSTMModelTrainerAttention:
 
     def hyperparameter_search(self, max_shift, output_size=1):
         hidden_layer_sizes = [ 100]
-        num_layers_list = [9]
+        num_layers_list = [5]
         learning_rates = [0.0005]
         num_epochs_list = [40]
         dropout=[0.3]
@@ -1136,9 +1136,11 @@ class LSTMRollingForecaster:
                 padding_length = self.max_seq_length - len(indices)
                 indices += [indices[-1]] * padding_length  # Pad with the last valid index
             indices = [i if i >= 0 else 0 for i in indices]
+            indices = [i if 0 <= i < self.scaled_features.size(1) else -1 for i in indices]
+
             # print(f'{indices=}')
             # Set current features based on the prepared indices
-            self.current_features = self.scaled_features[:, [i for i in indices], :]
+            self.current_features = self.scaled_features[:, indices, :]
 
 
         return True
@@ -1179,108 +1181,138 @@ class LSTMRollingForecaster:
 
 
 
+def calculate_and_plot_errors(y_r, X_real, best_model, data_prep, ETOT_horizons, cbaslabels, start_idx=-1500, end_idx=-1400, target_length=61, bucket_size=5):
+    from collections import defaultdict
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from tqdm import tqdm
 
-def calculate_and_plot_errors(y_r, X_real, best_model, data_prep, ETOT_horizons, cbaslabels, start_idx=-1500, end_idx=-1400, target_length=61):
-    """
-    Calculate and plot errors for Mean Absolute Error (MAE) per timestep 
-    and Mean Prediction Error vs Time to CBAS Entry (bucketed in 5-minute intervals).
-
-    Args:
-        y_r (array-like): Ground truth values.
-        X_real (array-like): Input feature data.
-        best_model (object): Pretrained model for forecasting.
-        data_prep (object): Data preparation utility.
-        ETOT_horizons (array-like): Time horizons for error calculation.
-        cbaslabels (array-like): Time-to-CBAS labels for each instance.
-        start_idx (int): Start index for the range of `y_r` to process.
-        end_idx (int): End index for the range of `y_r` to process.
-        target_length (int): Target length for error arrays.
-
-    Returns:
-        tuple: (MAE per timestep, mean prediction error by bucket)
-    """
-
-    ap = []  # List to store absolute errors per timestep
-    error = []
-    abs_error_dict = defaultdict(list)  # Dictionary to store errors by time to CBAS entry
+    ap = []
+    signed_errors = []
     error_dict = defaultdict(list)
-    # Debug: Print initial data for checking
-    print(f'Non-zero indices in y_r: {np.where(y_r == 1)[0]}')
-    print(f'ETOT_horizons: {ETOT_horizons}')
+    signed_error_dict = defaultdict(list)
 
-    # Loop through the specified range in `y_r`
     for fnr in tqdm(np.where((y_r <= 120))[0][start_idx:end_idx]):
         # Create rolling forecaster instance
         recursive = LSTMRollingForecaster(best_model, data_prep, X_real[fnr], ETOT_horizons)
         pred = recursive.rolling_forecast()
-
-        # Calculate absolute error per timestep
-        absolute_error_per_timestep = np.abs(pred[-target_length:] - y_r[fnr])[::-1]
-        error_per_timestep = (pred[-target_length:] - y_r[fnr])
-
+        
+        # Calculate errors per timestep
+        error_per_timestep = (pred[-target_length:] - y_r[fnr])[::-1]
+        absolute_error_per_timestep = np.abs(error_per_timestep)
+        
+        # Ensure each error array has `target_length` elements
+        if len(absolute_error_per_timestep) < target_length:
+            absolute_error_per_timestep = np.pad(absolute_error_per_timestep, 
+                                                 (0, target_length - len(absolute_error_per_timestep)), 
+                                                 constant_values=np.nan)
+            error_per_timestep = np.pad(error_per_timestep[::-1], 
+                                        (0, target_length - len(error_per_timestep)), 
+                                        constant_values=np.nan)
+        
+        ap.append(absolute_error_per_timestep)
+        signed_errors.append(error_per_timestep)
+        
+        # Reverse for alignment and fetch relevant CBAS labels
         clabel = [x.astype('timedelta64[s]').astype(int) / 60 for x in cbaslabels[fnr] if not np.isnat(x)][-target_length:][::-1]
-        if len(absolute_error_per_timestep) > len(clabel):
-            absolute_error_per_timestep = absolute_error_per_timestep[-len(clabel):]
-            error_per_timestep = error_per_timestep[-len(clabel):]
-
-        # Loop over `clabel` and `absolute_error_per_timestep` to populate error_dict
+        absolute_error_per_timestep = absolute_error_per_timestep[-len(clabel):]
+        error_per_timestep = error_per_timestep[-len(clabel):]
+        
+        # Populate the error dictionaries
         for i in range(len(absolute_error_per_timestep)):
             time_to_cbas = np.round(clabel[i], 0)
-            abs_error_dict[time_to_cbas].append(absolute_error_per_timestep[i])
-            error_dict[time_to_cbas].append(error_per_timestep[i])
-
-        # Collect errors for MAE calculation
-        if len(absolute_error_per_timestep) < target_length:
-            padded_abs_error = np.pad(absolute_error_per_timestep, 
-                                  (0, target_length - len(absolute_error_per_timestep)), 
-                                  constant_values=np.nan)
-            padded_error = np.pad(error_per_timestep, 
-                        (0, target_length - len(error_per_timestep)), 
-                        constant_values=np.nan)
-            ap.append(padded_abs_error)
-            error.append(padded_error)
-        else:
-            ap.append(absolute_error_per_timestep)
-            error.append(error_per_timestep)
-
-    # Calculate MAE per timestep
+            error_dict[time_to_cbas].append(absolute_error_per_timestep[i])
+            signed_error_dict[time_to_cbas].append(error_per_timestep[i])
+    
+    # Calculate MAE and mean signed error per timestep
     mae_per_timestep = np.nanmean(ap, axis=0)
-
-    # Compute bucketed mean errors
+    std_mae_per_timestep = np.nanstd(ap, axis=0)
+    mean_signed_error_per_timestep = np.nanmean(signed_errors, axis=0)
+    std_signed_error_per_timestep = np.nanstd(signed_errors, axis=0)
+    
+    # Group errors into time buckets
     bucketed_errors = defaultdict(list)
-    for time_in_seconds, errors in abs_error_dict.items():
+    bucketed_signed_errors = defaultdict(list)
+    for time_in_seconds, errors in error_dict.items():
         time_in_minutes = time_in_seconds
-        bucket = int(time_in_minutes // 5) * 5
+        bucket = int(time_in_minutes // bucket_size) * bucket_size
         bucketed_errors[bucket].extend(errors)
-
+        bucketed_signed_errors[bucket].extend(signed_error_dict[time_in_seconds])
+    
+    # Compute mean errors by bucket
     mean_errors_by_bucket = {bucket: np.nanmean(errors) for bucket, errors in bucketed_errors.items()}
-    sorted_buckets = sorted(mean_errors_by_bucket.items())
-
-    # Extract sorted times and mean errors for plotting
-    times = [item[0] for item in sorted_buckets]
-    abs_errors = [item[1] for item in sorted_buckets]
-
+    std_errors_by_bucket = {bucket: np.nanstd(errors) for bucket, errors in bucketed_errors.items()}
+    mean_signed_errors_by_bucket = {bucket: np.nanmean(errors) for bucket, errors in bucketed_signed_errors.items()}
+    std_signed_errors_by_bucket = {bucket: np.nanstd(errors) for bucket, errors in bucketed_signed_errors.items()}
+    
     # Plot MAE per timestep
     plt.figure(figsize=(10, 6))
-    plt.plot(ETOT_horizons[:target_length], mae_per_timestep, marker='o')
+    plt.plot(ETOT_horizons[:target_length], mae_per_timestep[::-1], marker='o', label="Mean Absolute Error")
+    # plt.fill_between(ETOT_horizons[:target_length], 
+    #                  mae_per_timestep[::-1] - std_mae_per_timestep[::-1], 
+    #                  mae_per_timestep[::-1] + std_mae_per_timestep[::-1], 
+    #                  alpha=0.2, label="Std Dev")
     plt.xlabel('Timestep')
     plt.xticks(ETOT_horizons[:target_length], rotation='vertical')
     plt.ylabel('Mean Absolute Error (MAE)')
     plt.title('MAE for Each Timestep')
     plt.tight_layout()
     plt.grid(True)
+    plt.legend()
     plt.show()
-
-    # Plot Mean Prediction Error vs Time to CBAS Entry
+    
+    # Plot Mean Signed Error per Timestep
     plt.figure(figsize=(10, 6))
-    plt.plot(times[:-10], abs_errors[:-10], marker='o', linestyle='-')
-    plt.title("Mean Prediction Error vs Time to CBAS Entry (bucketed in 5-minute intervals)")
-    plt.xlabel("Time to CBAS Entry (minutes)")
-    plt.ylabel("Mean Prediction Error (minutes)")
+    plt.plot(ETOT_horizons[:target_length], mean_signed_error_per_timestep[::-1], marker='o', color='orange', label="Mean Signed Error")
+    # plt.fill_between(ETOT_horizons[:target_length], 
+    #                  mean_signed_error_per_timestep[::-1] - std_signed_error_per_timestep[::-1], 
+    #                  mean_signed_error_per_timestep[::-1] + std_signed_error_per_timestep[::-1], 
+    #                  alpha=0.2, color='orange', label="Std Dev")
+    plt.xlabel('Timestep')
+    plt.xticks(ETOT_horizons[:target_length], rotation='vertical')
+    plt.ylabel('Mean Signed Error')
+    plt.title('Mean Signed Error for Each Timestep')
+    plt.tight_layout()
     plt.grid(True)
+    plt.legend()
     plt.show()
-
-    return mae_per_timestep, mean_errors_by_bucket
-
-# Example usage
-# mae_timestep, prediction_error_buckets = calculate_and_plot_errors(y_r, X_real, best_model, data_prep, ETOT_horizons, cbaslabels)
+    
+    # Plot Mean Absolute Error by Time Buckets
+    sorted_buckets = sorted(mean_errors_by_bucket.items())
+    times = [-item[0] for item in sorted_buckets]
+    errors = [item[1] for item in sorted_buckets]
+    std_errors = [std_errors_by_bucket[item[0]] for item in sorted_buckets]
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(times, errors, marker='o', linestyle='-', label="Mean Absolute Error")
+    # plt.fill_between(times, 
+    #                  np.array(errors) - np.array(std_errors), 
+    #                  np.array(errors) + np.array(std_errors), 
+    #                  alpha=0.2, label="Std Dev")
+    plt.title("Mean Prediction Absolute Error vs Time to CBAS Entry (bucketed in 5-minute intervals)")
+    plt.xlabel("Time to CBAS Entry (minutes)")
+    plt.ylabel("Mean Prediction Absolute Error (minutes)")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+    
+    # Plot Mean Signed Error by Time Buckets
+    sorted_signed_buckets = sorted(mean_signed_errors_by_bucket.items())
+    times_signed = [-item[0] for item in sorted_signed_buckets]
+    signed_errors = [item[1] for item in sorted_signed_buckets]
+    std_signed_errors = [std_signed_errors_by_bucket[item[0]] for item in sorted_signed_buckets]
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(times_signed, signed_errors, marker='o', linestyle='-', color='orange', label="Mean Signed Error")
+    # plt.fill_between(times_signed, 
+    #                  np.array(signed_errors) - np.array(std_signed_errors), 
+    #                  np.array(signed_errors) + np.array(std_signed_errors), 
+    #                  alpha=0.2, color='orange', label="Std Dev")
+    plt.title("Mean Prediction Signed Error vs Time to CBAS Entry (bucketed in 5-minute intervals)")
+    plt.xlabel("Time to CBAS Entry (minutes)")
+    plt.ylabel("Mean Prediction Signed Error (minutes)")
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+    
+    return mae_per_timestep, mean_errors_by_bucket, mean_signed_errors_by_bucket

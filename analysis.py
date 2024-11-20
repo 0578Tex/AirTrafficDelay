@@ -32,7 +32,7 @@ def plot_correlation_heatmap(X, include_fixed=True):
     datetime_cols = ['ETOT', 'EOBT', 'ETA', 'cbasentry', 'TSAT', 'TOBT']
     for col in datetime_cols:
         fixed_features[col] = pd.to_datetime(fixed_features[col], errors='coerce')
-    print(f'{fixed_features=}')
+    # print(f'{fixed_features=}')
     
     # Concatenate fixed features with earliest and latest time-varying features
     earliest_features = pd.concat([fixed_features, earliest_features.reset_index(drop=True)], axis=1)
@@ -41,7 +41,8 @@ def plot_correlation_heatmap(X, include_fixed=True):
     # Select only numerical columns and drop rows with missing values for correlation computation
     earliest_features = earliest_features.select_dtypes(include=['number']).dropna()
     latest_features = latest_features.select_dtypes(include=['number']).dropna()
-
+    earliest_features.columns = [col.replace(earliest_pattern, '').replace('_', ' ') for col in earliest_features.columns]
+    latest_features.columns = [col.replace(latest_pattern, '').replace('_', ' ') for col in latest_features.columns]
     # Compute correlation matrices
     corr_earliest = abs(earliest_features.corr())
     corr_latest = abs(latest_features.corr())
