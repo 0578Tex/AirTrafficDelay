@@ -273,3 +273,85 @@ class CatBoostTrainer:
             plt.ylabel('Importance Score')
             plt.tight_layout()
             plt.show()
+
+
+class CATRollingForecaster:
+    def __init__(self, model_folder, data_prep, scaled_flight_features, time_horizons):
+        """
+        :param model_folder: Directory where the LightGBM models are saved.
+        :param data_prep: DataPreparation instance used during training (contains scalers).
+        :param scaled_flight_features: Transformed (scaled) features for a specific flight (numpy array).
+        :param time_horizons: List of time horizons (e.g., [-300, -295, ..., 0]).
+        """
+        self.model_folder = model_folder
+        self.data_prep = data_prep
+        self.scaled_features = scaled_flight_features  # Shape: (timesteps, features)
+        self.time_horizons = time_horizons  # List of horizons corresponding to timesteps
+        self.current_time_index = 0  # Index of the current time step in the features
+        self.predictions = []  # Store predictions at each step
+        self.models = self.load_models()  # Load all LightGBM models
+
+    def reset(self):
+        self.current_time_index = 0  # Index of the current time step in the features
+        self.predictions = []  # Store predictions at each step
+
+    def load_models(self):
+        """
+        Load the LightGBM models for each timestep.
+        Returns a dictionary with horizon as key and model as value.
+        """
+        models = {}
+        for t_idx, horizon in enumerate(self.time_horizons):
+            model_filename = f"catboost_{horizon}.pkl"
+            model_path = os.path.join(self.model_folder, model_filename)
+            if os.path.exists(model_path):
+                with open(model_path, 'rb') as f:
+                    models[horizon] = pickle.load(f)
+                # print(f"Loaded model for horizon {horizon} from {model_path}")
+            # else:
+                # print(f"Model file {model_path} not found. Skipping horizon {horizon}.")
+        return models
+
+    def rolling_forecast(self):
+        """
+        Perform rolling forecasts using the LightGBM models.
+        """
+        prediction = None
+        num_timesteps = self.scaled_features.shape[0]
+        for t in range(num_timesteps):
+            # Update current time index
+            self.current_time_index = t
+
+            # Get the features at the current timestep
+            current_features = self.scaled_features[t, :]  # Shape: (features,)
+            if np.isnan(current_features).any():
+                break
+            def myround(x, base=5):
+                return base * round(x/base)
+            # Get the corresponding horizon
+            # print(f'{t=}')
+            # print(f'{(self.predictions[-1] if prediction else 0)=}')
+            horizon=str(max(-300, myround(-300 + 5 *t - (self.predictions[-1] if prediction else 0))))
+            # print(f'ttiltakeof = {(-300 + 5 *t - (self.predictions[-1] if prediction else 0))}')
+            # print(f'{horizon=}')
+            # Check if model exists for this horizon
+            # print(f'{self.models=}')
+            if horizon not in self.models:
+                horizon = str(0)
+                # print(f"No model found for horizon {horizon}. Skipping prediction.")
+
+            # Get the model for the current horizon
+            model = self.models[horizon]
+
+            # Reshape features for prediction
+            features_for_prediction = current_features.reshape(1, -1)  # Shape: (1, features)
+
+            # Make prediction
+            prediction_scaled = model.predict(features_for_prediction)
+            # Inverse transform the prediction
+            prediction = self.data_prep.scaler_y.inverse_transform(prediction_scaled.reshape(-1, 1)).flatten()[0]
+
+            # Store the prediction
+            self.predictions.append(prediction)
+
+        return self.predictions

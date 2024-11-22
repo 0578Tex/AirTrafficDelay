@@ -8,34 +8,14 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import RandomizedSearchCV
   
 class RandomForestTrainer:
-    def __init__(self, dataprep=None, n_estimators=100, random_state=42, max_depth=None, 
-                 min_samples_split=2, horizons=[], cv=3, n_iter=50, scoring='neg_mean_absolute_error', 
+    def __init__(self, dataprep=None, random_state=42,
+                 horizons=[], cv=3, n_iter=50, scoring='neg_mean_absolute_error', 
                  verbose=1, random_search=True, param_distributions=None):
-        """
-        Initializes the trainer with hyperparameters for RF models.
-        
-        Parameters:
-            dataprep (DataPreparationRF): Instance of DataPreparationRF used during data preparation.
-            n_estimators (int): Number of trees in the forest.
-            random_state (int): Controls both the randomness of the bootstrapping of the samples 
-                                and the sampling of the features to consider when looking for the best split.
-            max_depth (int or None): The maximum depth of the tree.
-            min_samples_split (int): The minimum number of samples required to split an internal node.
-            horizons (list): List of actual horizon values corresponding to timesteps.
-            cv (int): Number of cross-validation folds for hyperparameter search.
-            n_iter (int): Number of parameter settings that are sampled in RandomizedSearchCV.
-            scoring (str): Scoring metric for hyperparameter search.
-            verbose (int): Controls the verbosity: the higher, the more messages.
-            random_search (bool): If True, use RandomizedSearchCV; else, use GridSearchCV.
-            param_distributions (dict): Dictionary with parameters names (`str`) as keys and distributions or lists of parameters to try.
-        """
+
         self.data_prep = dataprep
         self.models = {}  # Dictionary to store best RF models per timestep
         self.best_params = {}  # Dictionary to store best parameters per timestep
-        self.n_estimators = n_estimators
         self.random_state = random_state
-        self.max_depth = max_depth
-        self.min_samples_split = min_samples_split
         self.horizons = horizons
         self.cv = cv
         self.n_iter = n_iter
@@ -48,12 +28,12 @@ class RandomForestTrainer:
         # Default hyperparameter distributions if none provided
         if param_distributions is None:
             self.param_distributions = {
-                'n_estimators': [int(x) for x in np.linspace(start=100, stop=1000, num=2)],
-                'max_depth': [None] + [int(x) for x in np.linspace(10, 110, num=2)],
-                'min_samples_split': [2, 20],
-                'min_samples_leaf': [1, 8],
+                'n_estimators': [200],
+                'max_depth': [20],
+                'max_features':[0.7],
+                'max_samples': [0.8],
                 'bootstrap': [True],
-                'max_features': ['auto','log2']
+                # 'max_features': ['auto','log2']
             }
         else:
             self.param_distributions = param_distributions
@@ -183,4 +163,80 @@ class RandomForestTrainer:
             plt.xlim([-1, top_n])
             plt.tight_layout()
             plt.show()
+
+
+
+class RFRollingForecaster:
+    def __init__(self, model_folder, data_prep, scaled_flight_features, time_horizons):
+        """
+        :param model_folder: Directory where the LightGBM models are saved.
+        :param data_prep: DataPreparation instance used during training (contains scalers).
+        :param scaled_flight_features: Transformed (scaled) features for a specific flight (numpy array).
+        :param time_horizons: List of time horizons (e.g., [-300, -295, ..., 0]).
+        """
+        self.model_folder = model_folder
+        self.data_prep = data_prep
+        self.scaled_features = scaled_flight_features  # Shape: (timesteps, features)
+        self.time_horizons = time_horizons  # List of horizons corresponding to timesteps
+        self.current_time_index = 0  # Index of the current time step in the features
+        self.predictions = []  # Store predictions at each step
+        self.models = self.load_models()  # Load all LightGBM models
+
+    def load_models(self):
+        """
+        Load the LightGBM models for each timestep.
+        Returns a dictionary with horizon as key and model as value.
+        """
+        models = {}
+        for t_idx, horizon in enumerate(self.time_horizons):
+            model_filename = f"rf_{horizon}.pkl"
+            model_path = os.path.join(self.model_folder, model_filename)
+            if os.path.exists(model_path):
+                with open(model_path, 'rb') as f:
+                    models[horizon] = pickle.load(f)
+                print(f"Loaded model for horizon {horizon} from {model_path}")
+            else:
+                print(f"Model file {model_path} not found. Skipping horizon {horizon}.")
+        return models
+
+    def rolling_forecast(self):
+        """
+        Perform rolling forecasts using the LightGBM models.
+        """
+        num_timesteps = self.scaled_features.shape[0]
+        for t in range(num_timesteps):
+            # Update current time index
+            self.current_time_index = t
+
+            # Get the features at the current timestep
+            current_features = self.scaled_features[t, :]  # Shape: (features,)
+
+            # Get the corresponding horizon
+            if t < len(self.time_horizons):
+                horizon = self.time_horizons[t]
+            else:
+                print(f"No corresponding horizon for timestep {t}. Stopping forecast.")
+                break
+
+            # Check if model exists for this horizon
+            if horizon not in self.models:
+                print(f"No model found for horizon {horizon}. Skipping prediction.")
+                self.predictions.append(np.nan)
+                continue
+
+            # Get the model for the current horizon
+            model = self.models[horizon]
+
+            # Reshape features for prediction
+            features_for_prediction = current_features.reshape(1, -1)  # Shape: (1, features)
+
+            # Make prediction
+            prediction_scaled = model.predict(features_for_prediction)
+            # Inverse transform the prediction
+            prediction = self.data_prep.scaler_y.inverse_transform(prediction_scaled.reshape(-1, 1)).flatten()[0]
+
+            # Store the prediction
+            self.predictions.append(prediction)
+
+        return self.predictions
 

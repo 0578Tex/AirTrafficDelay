@@ -529,11 +529,11 @@ class LSTMModelTrainerAttention:
 # Best Params: (80, 150, 1, 11, 0.0005, 40, 1, 4, 0.3), Best Val Loss: 0.2501
 
     def hyperparameter_search(self, max_shift, output_size=1):
-        hidden_layer_sizes = [ 100]
-        num_layers_list = [5]
+        hidden_layer_sizes = [50,60,70,100]
+        num_layers_list = [3,4,5,6]
         learning_rates = [0.0005]
         num_epochs_list = [40]
-        dropout=[0.3]
+        dropout=[0.2]
         l1_penalties = [0]
         l2_penalties = [0]
         max_shift=[max_shift]
@@ -567,7 +567,7 @@ class LSTMModelTrainerAttention:
 
         print(f"Best Params: {best_params}, Best Val Loss: {best_val_loss:.4f}")
         return best_model
-
+    
     def evaluate_and_plot(self, model, X_test_tensor, y_test_tensor, scaler_y, horizons):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         X_test_tensor = X_test_tensor.to(device)
@@ -579,9 +579,12 @@ class LSTMModelTrainerAttention:
             try:
                 seq_lengths_val = (X_test_tensor.sum(dim=2) != 0).sum(dim=1).cpu().numpy()
             except:
-                seq_lengths_val = torch.tensor((X_test_tensor.sum(dim=2) != 0).sum(dim=1), device=X_test_tensor.device)
+                seq_lengths_val = torch.tensor(
+                    (X_test_tensor.sum(dim=2) != 0).sum(dim=1), device=X_test_tensor.device
+                )
             y_test_pred, _ = model(X_test_tensor, seq_lengths_val)  # Shape: (batch_size, time_steps, output_size)
-        print(f'{self.time_steps}')
+
+        # print(f'{self.time_steps}')
         self.time_steps = 61  # Ensure this matches the actual time_steps
 
         # Inverse transform the scaled predictions and true values for comparison
@@ -592,17 +595,52 @@ class LSTMModelTrainerAttention:
         y_test_inverse = scaler_y.inverse_transform(
             y_test_tensor.detach().cpu().numpy().reshape(-1, 1)
         ).reshape(-1, self.time_steps)
-        # Plot MAE per timestep
+
+        # Compute absolute error per timestep
         absolute_error_per_timestep = np.abs(y_test_inverse - y_test_pred_inverse)
 
+        # Compute MAE per timestep
         mae_per_timestep = np.mean(absolute_error_per_timestep, axis=0)
-        print(f'{mae_per_timestep=}')
+        # print(f'{mae_per_timestep=}')
+        
+        # Plot MAE per timestep
         plt.figure(figsize=(10, 6))
         plt.plot(horizons, mae_per_timestep, marker='o')
         plt.xlabel('Timestep')
         plt.xticks(horizons, rotation='vertical')
         plt.ylabel('Mean Absolute Error (MAE)')
         plt.title('MAE for Each Timestep')
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+        # Compute error per timestep
+        error_per_timestep = y_test_inverse - y_test_pred_inverse
+
+        # Compute mean error per timestep
+        mean_error_per_timestep = np.mean(error_per_timestep, axis=0)
+        # print(f'{mean_error_per_timestep=}')
+
+        # Compute standard deviation of error per timestep
+        std_error_per_timestep = np.std(error_per_timestep, axis=0)
+        # print(f'{std_error_per_timestep=}')
+
+        # Plot mean error per timestep with standard deviation as fill
+        plt.figure(figsize=(10, 6))
+        plt.plot(horizons, mean_error_per_timestep, marker='o', label='Mean Error')
+        plt.fill_between(
+            horizons,
+            mean_error_per_timestep - std_error_per_timestep,
+            mean_error_per_timestep + std_error_per_timestep,
+            color='b',
+            alpha=0.2,
+            label='±1 Std Dev'
+        )
+        plt.xlabel('Timestep')
+        plt.xticks(horizons, rotation='vertical')
+        plt.ylabel('Mean Error')
+        plt.title('Mean Error for Each Timestep with Standard Deviation')
+        plt.legend()
         plt.grid(True)
         plt.tight_layout()
         plt.show()
@@ -1201,15 +1239,6 @@ def calculate_and_plot_errors(y_r, X_real, best_model, data_prep, ETOT_horizons,
         error_per_timestep = (pred[-target_length:] - y_r[fnr])[::-1]
         absolute_error_per_timestep = np.abs(error_per_timestep)
         
-        # Ensure each error array has `target_length` elements
-        if len(absolute_error_per_timestep) < target_length:
-            absolute_error_per_timestep = np.pad(absolute_error_per_timestep, 
-                                                 (0, target_length - len(absolute_error_per_timestep)), 
-                                                 constant_values=np.nan)
-            error_per_timestep = np.pad(error_per_timestep[::-1], 
-                                        (0, target_length - len(error_per_timestep)), 
-                                        constant_values=np.nan)
-        
         ap.append(absolute_error_per_timestep)
         signed_errors.append(error_per_timestep)
         
@@ -1248,10 +1277,10 @@ def calculate_and_plot_errors(y_r, X_real, best_model, data_prep, ETOT_horizons,
     # Plot MAE per timestep
     plt.figure(figsize=(10, 6))
     plt.plot(ETOT_horizons[:target_length], mae_per_timestep[::-1], marker='o', label="Mean Absolute Error")
-    # plt.fill_between(ETOT_horizons[:target_length], 
-    #                  mae_per_timestep[::-1] - std_mae_per_timestep[::-1], 
-    #                  mae_per_timestep[::-1] + std_mae_per_timestep[::-1], 
-    #                  alpha=0.2, label="Std Dev")
+    plt.fill_between(ETOT_horizons[:target_length], 
+                     mae_per_timestep[::-1] - std_mae_per_timestep[::-1], 
+                     mae_per_timestep[::-1] + std_mae_per_timestep[::-1], 
+                     alpha=0.2, label="Std Dev")
     plt.xlabel('Timestep')
     plt.xticks(ETOT_horizons[:target_length], rotation='vertical')
     plt.ylabel('Mean Absolute Error (MAE)')
@@ -1264,10 +1293,10 @@ def calculate_and_plot_errors(y_r, X_real, best_model, data_prep, ETOT_horizons,
     # Plot Mean Signed Error per Timestep
     plt.figure(figsize=(10, 6))
     plt.plot(ETOT_horizons[:target_length], mean_signed_error_per_timestep[::-1], marker='o', color='orange', label="Mean Signed Error")
-    # plt.fill_between(ETOT_horizons[:target_length], 
-    #                  mean_signed_error_per_timestep[::-1] - std_signed_error_per_timestep[::-1], 
-    #                  mean_signed_error_per_timestep[::-1] + std_signed_error_per_timestep[::-1], 
-    #                  alpha=0.2, color='orange', label="Std Dev")
+    plt.fill_between(ETOT_horizons[:target_length], 
+                     mean_signed_error_per_timestep[::-1] - std_signed_error_per_timestep[::-1], 
+                     mean_signed_error_per_timestep[::-1] + std_signed_error_per_timestep[::-1], 
+                     alpha=0.2, color='orange', label="Std Dev")
     plt.xlabel('Timestep')
     plt.xticks(ETOT_horizons[:target_length], rotation='vertical')
     plt.ylabel('Mean Signed Error')

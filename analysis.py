@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import matplotlib.patches as patches
 import numpy as np
+from collections import defaultdict
 
 
 def plot_correlation_heatmap(X, include_fixed=True):
@@ -65,13 +66,13 @@ def plot_correlation_heatmap(X, include_fixed=True):
 
     # Plot the heatmaps with titles and adjusted tick size
     sns.heatmap(corr_earliest, ax=axs[0], **heatmap_kwargs)
-    axs[0].set_title("Earliest Time Step (-300)", fontsize=16, weight='bold')
-    axs[0].tick_params(axis='x', rotation=45, labelsize=15 )
+    axs[0].set_title("Earliest Time Step (T-300)", fontsize=16, weight='bold')
+    axs[0].tick_params(axis='x', rotation=90, labelsize=15 )
     axs[0].tick_params(axis='y', rotation=0, labelsize=15 )
 
     sns.heatmap(corr_latest, ax=axs[1], **heatmap_kwargs)
-    axs[1].set_title("Latest Time Step (0)", fontsize=16, weight='bold')
-    axs[1].tick_params(axis='x', rotation=45, labelsize=15 )
+    axs[1].set_title("Latest Time Step (T-0)", fontsize=16, weight='bold')
+    axs[1].tick_params(axis='x', rotation=90, labelsize=15 )
     axs[1].tick_params(axis='y', rotation=0, labelsize=15 )
 
     # Draw a rectangle around the "delay" row in each heatmap if "delay" is present
@@ -93,25 +94,54 @@ def plot_correlation_heatmap(X, include_fixed=True):
     plt.show()
 
 
-def get_ETO_DEP(extended_df):
+def get_ETO_DEP(extended_df, plot=True):
     etolist = []
     TSATlist = []
     TOBTlist = []
     horizons =  range(-300, 5, 5)
+    cbaserrors = {}
     for t in horizons:
         etolist.append(np.mean(np.abs(extended_df['delay']-extended_df[f'etodepdelay_Tmin_{t}'])))
         TSATlist.append(np.mean(np.abs(extended_df['delay']-extended_df[f'TSATdelay_Tmin_{t}'])))
         TOBTlist.append(np.mean(np.abs(extended_df['delay']+extended_df[f'TOBTdelay_Tmin_{t}'])))
-    plt.figure(figsize=(10, 6))
-    plt.plot(horizons, etolist, label='ETO Delay', marker='o', linestyle='-')
-    # plt.plot(horizons, TSATlist, label='TSAT Delay', marker='o', linestyle='-')
-    # plt.plot(horizons, TOBTlist, label='TOBT Delay', marker='o', linestyle='-')
+        cbas = extended_df[f'timetoCBAS_Tmin_{t}'][0].total_seconds() / 60
+        if cbas not in cbaserrors.keys():
+             cbaserrors[cbas] = []
+        cbaserrors[cbas].append( np.mean(np.abs(extended_df['delay']-extended_df[f'etodepdelay_Tmin_{t}'])))
+    if plot:
+        plt.figure(figsize=(10, 6))
+        plt.plot(horizons, etolist, label='ETO Delay', marker='o', linestyle='-')
+        # plt.plot(horizons, TSATlist, label='TSAT Delay', marker='o', linestyle='-')
+        # plt.plot(horizons, TOBTlist, label='TOBT Delay', marker='o', linestyle='-')
 
 
-    plt.title("Mean Prediction Error vs Time to CBAS Entry (bucketed in 5-minute intervals)")
-    plt.xlabel("Time to ATOT")
-    plt.ylabel("Mean Prediction Error (minutes)")
-    plt.grid(True)
-    plt.legend()
-    plt.show()
-    return etolist
+        plt.title("Mean Prediction Error vs Time to ATOT (bucketed in 5-minute intervals)")
+        plt.xlabel("Time to ATOT")
+        plt.ylabel("Mean Prediction Error (minutes)")
+        plt.grid(True)
+
+
+        plt.legend()
+        plt.show()
+
+    bucketed_errors = defaultdict(list)
+    for time_in_minutes, errors in cbaserrors.items():
+        bucket = int(time_in_minutes // 5) * 5   # Group into 5-minute buckets
+        bucketed_errors[bucket].extend(errors)   # Aggregate errors within the bucket
+    mean_errors_by_bucket = {bucket: np.nanmean(errors) for bucket, errors in bucketed_errors.items()}
+    sorted_buckets = sorted(mean_errors_by_bucket.items())
+    print(f'{sorted_buckets=}')
+    times = [item[0] for item in sorted_buckets]
+    errors = [item[1] for item in sorted_buckets]
+    if plot:
+        plt.figure(figsize=(10, 6))
+        plt.plot(times, errors, marker='o', linestyle='-')
+        plt.title("Mean Absolute Prediction Error vs Time to CBAS Entry (bucketed in 5-minute intervals)")
+        plt.xlabel("Time to CBAS Entry (minutes)")
+        plt.ylabel("Mean Absolute Prediction Error (minutes)")
+        ax = plt.gca()
+        ax.invert_xaxis()
+
+        plt.grid(True)
+        plt.show()
+    return etolist, {i[0]:i[1] for i in sorted_buckets}

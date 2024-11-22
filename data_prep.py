@@ -93,7 +93,7 @@ class DataPreparation:
 
         return self.X_train_tensor, self.y_train_tensor, self.X_test_tensor, self.y_test_tensor, self.time_horizons, self.cbaslabels
 
-    def transform_data(self, X, update_t_to_eobt_values=None, split_ratio=0.8):
+    def transform_data(self, X, update_t_to_eobt_values=None, split_ratio=0.8, mode='lstm'):
 
         # Step 1: Separate time-varying and fixed features
         time_varying_columns, time_CBAS_columns, X_fixed, horizons = self._separate_features(X)
@@ -119,6 +119,8 @@ class DataPreparation:
 
         # Step 6: Concatenate fixed and time-varying features
         X_final = self._concatenate_fixed_time_varying(X_fixed_scaled, X_time_varying_scaled, horizons)
+        if mode == 'rf':
+            return X_final, horizons, cbaslabels 
 
         # Convert to PyTorch tensor
         X_tensor = torch.tensor(X_final, dtype=torch.float32)
@@ -146,9 +148,9 @@ class DataPreparation:
     def _separate_features(self, X):
 
         # Identify time-varying columns based on prefix and exclude CBAS columns
-        skip = ['CBAS', 'cbas', 'eobt', 'atot', 'wspeed', 'wdirec','wguts']
+        skip = ['CBAS', 'cbas', 'eobt', 'atot']#, 'wspeed', 'wdirec','wguts']
         print(f'{skip=}')
-        time_varying_columns = [col for col in X.columns if self.prefix in col and col not in skip and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col]
+        time_varying_columns = [col for col in X.columns if self.prefix in col and col not in skip]# and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col]
         unique_values_after_prefix = set([col.split(self.prefix)[1] for col in time_varying_columns])
         horizons = sorted(unique_values_after_prefix, key=int)
         # Identify CBAS columns (if any)
@@ -156,7 +158,7 @@ class DataPreparation:
 
         # Keep fixed columns consistent with the ones used during training
         if not self.fixed_columns:
-            self.fixed_columns = [col for col in X.columns if col not in time_varying_columns and col not in skip and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col]
+            self.fixed_columns = [col for col in X.columns if col not in time_varying_columns and col not in skip]# and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col]
 
         X_fixed = X[self.fixed_columns].copy()  # shape: (N, num_fixed_features)
         return time_varying_columns, time_CBAS_columns, X_fixed, horizons
