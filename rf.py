@@ -143,27 +143,80 @@ class RandomForestTrainer:
         plt.show()
         return mae_values
         
-
-    def plot_feature_importances(self, feature_names, top_n=20):
+    def plot_evolution_feature_importances(self, feature_names, top_n=20):
         """
-        Plots feature importances for each timestep's RF model.
+        Calculates feature importance for each RF model and plots the evolution of feature importances.
         
         Parameters:
-            feature_names (list): List of feature names.
-            top_n (int): Number of top features to display.
+            feature_names (list): List of feature names corresponding to the model inputs.
+            top_n (int): Number of top features to display in the plot.
         """
-        for t, rf in self.models.items():
-            importances = rf.feature_importances_
-            indices = np.argsort(importances)[::-1]
-            
-            plt.figure(figsize=(10, 6))
-            plt.title(f"Feature Importances for Timestep {t}")
-            plt.bar(range(top_n), importances[indices][:top_n], color="r", align="center")
-            plt.xticks(range(top_n), [feature_names[i] for i in indices[:top_n]], rotation=90)
-            plt.xlim([-1, top_n])
-            plt.tight_layout()
-            plt.show()
+        import matplotlib.pyplot as plt
+        import pandas as pd
 
+        # Initialize a DataFrame to store feature importances
+        importance_df = pd.DataFrame(columns=['Feature', 'Importance', 'Horizon'])
+
+        # Iterate over each horizon and model
+        for horizon in self.horizons:
+            model_filename = f"rf_{horizon}.pkl"
+            model_path = os.path.join(self.model_folder, model_filename)
+            
+            if os.path.exists(model_path):
+                # Load the model
+                with open(model_path, 'rb') as f:
+                    rf = pickle.load(f)
+                
+                # Get feature importances
+                importances = rf.feature_importances_
+                # Normalize importances
+                importances = importances / importances.sum()
+                
+                # Create a DataFrame for this horizon
+                df = pd.DataFrame({
+                    'Feature': feature_names,
+                    'Importance': importances,
+                    'Horizon': int(horizon)
+                })
+                
+                # Append to the main DataFrame
+                importance_df = pd.concat([importance_df, df], ignore_index=True)
+            else:
+                print(f"Model file {model_path} not found. Skipping horizon {horizon}.")
+
+        if importance_df.empty:
+            print("No feature importances were loaded. Ensure that models exist in the model folder.")
+            return
+
+        # Convert 'Horizon' to numeric type if not already
+        importance_df['Horizon'] = pd.to_numeric(importance_df['Horizon'], errors='coerce')
+        importance_df.dropna(subset=['Horizon'], inplace=True)  # Remove rows with invalid horizons
+
+        # Pivot the DataFrame to have features as rows and horizons as columns
+        pivot_df = importance_df.pivot_table(index='Feature', columns='Horizon', values='Importance', fill_value=0)
+
+        # Sort horizons
+        pivot_df = pivot_df.reindex(sorted(pivot_df.columns), axis=1)
+
+        # Select top_n features based on average importance across all horizons
+        mean_importances = pivot_df.mean(axis=1)
+        top_features = mean_importances.sort_values(ascending=False).head(top_n).index
+
+        # Filter the DataFrame to include only the top features
+        pivot_df = pivot_df.loc[top_features]
+
+        # Plot the evolution of feature importances
+        plt.figure(figsize=(12, 8))
+        for feature in top_features:
+            plt.plot(pivot_df.columns, pivot_df.loc[feature], marker='o', label=feature)
+        
+        plt.xlabel('Time Horizon')
+        plt.ylabel('Normalized Feature Importance')
+        plt.title('Evolution of Feature Importances over Time Horizons')
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
 
 
 class RFRollingForecaster:
@@ -182,27 +235,60 @@ class RFRollingForecaster:
         self.predictions = []  # Store predictions at each step
         self.models = self.load_models()  # Load all LightGBM models
 
+    def reset(self):
+        self.current_time_index = 0  # Index of the current time step in the features
+        self.predictions = []  # Store predictions at each step
+
     def load_models(self):
         """
-        Load the LightGBM models for each timestep.
+        Load the Random Forest models for each timestep and calculate the total number of learned parameters.
         Returns a dictionary with horizon as key and model as value.
         """
         models = {}
+        total_nodes = 0  # Initialize total nodes counter
+
+        print("\n--- Loading Random Forest Models and Calculating Learned Parameters ---")
         for t_idx, horizon in enumerate(self.time_horizons):
             model_filename = f"rf_{horizon}.pkl"
             model_path = os.path.join(self.model_folder, model_filename)
             if os.path.exists(model_path):
                 with open(model_path, 'rb') as f:
-                    models[horizon] = pickle.load(f)
-                print(f"Loaded model for horizon {horizon} from {model_path}")
+                    model = pickle.load(f)
+                    if not isinstance(model, RandomForestRegressor):
+                        print(f"Model loaded from {model_path} is not a RandomForestRegressor. Skipping.")
+                        continue
+                    models[horizon] = model
+
+                # Retrieve model parameters
+                n_estimators = model.n_estimators
+                max_depth = model.max_depth if model.max_depth is not None else 0  # 0 implies unlimited depth
+
+                if max_depth == 0:
+                    # Estimate max_depth based on training data or set a default
+                    max_depth = 20  # Example default; adjust as needed
+
+                # Calculate the number of nodes per tree
+                nodes_per_tree = (2 ** max_depth) - 1  # Binary tree node count
+                total_nodes_model = n_estimators * nodes_per_tree  # Total nodes for this model
+
+                print(f"Loaded model for horizon {horizon}:")
+                print(f"  - Number of Trees (n_estimators): {n_estimators}")
+                print(f"  - Max Depth per Tree (max_depth): {max_depth}")
+                print(f"  - Nodes per Tree: {nodes_per_tree}")
+                print(f"  - Total Nodes for Model: {total_nodes_model}\n")
+
+                total_nodes += total_nodes_model  # Accumulate total nodes
             else:
-                print(f"Model file {model_path} not found. Skipping horizon {horizon}.")
+                print(f"Model file {model_path} not found. Skipping horizon {horizon}.\n")
+
+        print(f"--- Total Learned Parameters (Decision Nodes) Across All RF Models: {total_nodes} ---\n")
         return models
 
     def rolling_forecast(self):
         """
         Perform rolling forecasts using the LightGBM models.
         """
+        prediction = None
         num_timesteps = self.scaled_features.shape[0]
         for t in range(num_timesteps):
             # Update current time index
@@ -210,19 +296,21 @@ class RFRollingForecaster:
 
             # Get the features at the current timestep
             current_features = self.scaled_features[t, :]  # Shape: (features,)
-
-            # Get the corresponding horizon
-            if t < len(self.time_horizons):
-                horizon = self.time_horizons[t]
-            else:
-                print(f"No corresponding horizon for timestep {t}. Stopping forecast.")
+            if np.isnan(current_features).any():
                 break
-
+            def myround(x, base=5):
+                return base * round(x/base)
+            # Get the corresponding horizon
+            # print(f'{t=}')
+            # print(f'{(self.predictions[-1] if prediction else 0)=}')
+            horizon=str(max(-300, myround(-300 + 5 *t - (np.mean(self.predictions[-5:]) if self.predictions  else 0))))
+            # print(f'ttiltakeof = {(-300 + 5 *t - (self.predictions[-1] if prediction else 0))}')
+            # print(f'{horizon=}')
             # Check if model exists for this horizon
+            # print(f'{self.models=}')
             if horizon not in self.models:
-                print(f"No model found for horizon {horizon}. Skipping prediction.")
-                self.predictions.append(np.nan)
-                continue
+                horizon = str(0)
+                # print(f"No model found for horizon {horizon}. Skipping prediction.")
 
             # Get the model for the current horizon
             model = self.models[horizon]

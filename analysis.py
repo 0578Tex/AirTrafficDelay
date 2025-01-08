@@ -44,7 +44,14 @@ def plot_correlation_heatmap(X, include_fixed=True):
     latest_features = latest_features.select_dtypes(include=['number']).dropna()
     earliest_features.columns = [col.replace(earliest_pattern, '').replace('_', ' ') for col in earliest_features.columns]
     latest_features.columns = [col.replace(latest_pattern, '').replace('_', ' ') for col in latest_features.columns]
+    print(f'{earliest_features.columns=}')
     # Compute correlation matrices
+    print(f'{len(['Distance', 'Capacity Departure', 'Capacity Destination', 'Delay', 'ATFM Delay', 'COBT Delay', 'Flight time', 'Visibility', 'TSAT Delay',
+                        'TOBT Delay', 'ETO DEP Delay', 'Wind Speed', 'Wind Direction', 'Wind Guts', 'Knock-on Delay'])=}')
+    earliest_features.columns = ['Distance', 'Capacity Departure', 'Capacity Destination', 'Delay', 'ATFM Delay', 'COBT Delay', 'Flight time', 'Visibility', 'TSAT Delay',
+                        'TOBT Delay', 'Flight plan Delay', 'Wind Speed', 'Wind Direction', 'Wind Guts', 'Knock-on Delay']
+    latest_features.columns = ['Distance', 'Capacity Departure', 'Capacity Destination', 'Delay', 'ATFM Delay', 'COBT Delay', 'Flight time', 'Visibility', 'TSAT Delay',
+                        'TOBT Delay', 'Flight plan Delay', 'Wind Speed', 'Wind Direction', 'Wind Guts', 'Knock-on Delay']
     corr_earliest = abs(earliest_features.corr())
     corr_latest = abs(latest_features.corr())
 
@@ -53,7 +60,7 @@ def plot_correlation_heatmap(X, include_fixed=True):
 
     # Create a figure with attractive settings
     fig, axs = plt.subplots(1, 2, figsize=(28, 12))
-    plt.suptitle("Correlation Heatmaps for Earliest and Latest Time Steps", fontsize=20, weight='bold', color='#333')
+    # plt.suptitle("Correlation Heatmaps for Earliest and Latest Time Steps", fontsize=20, weight='bold', color='#333')
 
     # Set heatmap color palette and annotations
     heatmap_kwargs = {
@@ -61,24 +68,24 @@ def plot_correlation_heatmap(X, include_fixed=True):
         "annot": True, 
         "fmt": ".2f", 
         "annot_kws": {"size": 15}, 
-        "cbar_kws": {"shrink": 0.8, "aspect": 15}
+        "cbar_kws": {"shrink": 0.8, "aspect": 20}
     }
 
     # Plot the heatmaps with titles and adjusted tick size
     sns.heatmap(corr_earliest, ax=axs[0], **heatmap_kwargs)
-    axs[0].set_title("Earliest Time Step (T-300)", fontsize=16, weight='bold')
-    axs[0].tick_params(axis='x', rotation=90, labelsize=15 )
-    axs[0].tick_params(axis='y', rotation=0, labelsize=15 )
+    axs[0].set_title("Earliest Time Step (T - 300)", fontsize=25, weight='bold')
+    axs[0].tick_params(axis='x', rotation=90, labelsize=18 )
+    axs[0].tick_params(axis='y', rotation=0, labelsize=18 )
 
     sns.heatmap(corr_latest, ax=axs[1], **heatmap_kwargs)
-    axs[1].set_title("Latest Time Step (T-0)", fontsize=16, weight='bold')
-    axs[1].tick_params(axis='x', rotation=90, labelsize=15 )
-    axs[1].tick_params(axis='y', rotation=0, labelsize=15 )
+    axs[1].set_title("Latest Time Step (T - 0)", fontsize=25, weight='bold')
+    axs[1].tick_params(axis='x', rotation=90, labelsize=18 )
+    axs[1].tick_params(axis='y', rotation=0, labelsize=18 )
 
     # Draw a rectangle around the "delay" row in each heatmap if "delay" is present
     for ax, corr_matrix in zip(axs, [corr_earliest, corr_latest]):
-        if 'delay' in corr_matrix.index:
-            delay_row_idx = corr_matrix.index.get_loc('delay')
+        if 'Delay' in corr_matrix.index:
+            delay_row_idx = corr_matrix.index.get_loc('Delay')
             # Rectangle parameters: position (x, y), width, and height
             rect = patches.Rectangle(
                 (0, delay_row_idx),  # (x, y) position

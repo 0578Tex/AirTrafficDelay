@@ -20,6 +20,9 @@ from tqdm import tqdm
 import itertools
 from flights import Flight, Flights
 import gc
+from datetime import datetime, timedelta
+
+
 class DataPreparation:
     def __init__(self, fixed_columns=None, prefix='_Tmin_', mean_threshold=0.1, var_threshold=0.1):
 
@@ -36,14 +39,133 @@ class DataPreparation:
         self.feature_settings = {}
         self.feature_name_to_idx = None  # Store feature mapping
         self.binary_features = ['modeltyp_EST', 'modeltyp_CAL', 'modeltyp_ACT', 'fltstate_FI', 'fltstate_SI', 'fltstate_other']
-        
-        # Store scaler for 't_to_eobt' feature separately
-        self.t_to_eobt_scaler = StandardScaler()
-
-
+       
+    
+    
     def fit_transform_data(self, X, y, split_ratio=0.8, mode='lstm'):
-
+        print(f'{X.columns=}')
         # Step 1: Separate time-varying and fixed features
+        if 'actype_B737' in X.columns.tolist():
+            print(f'inin')
+            self.binary_features = ['modeltyp_EST', 'modeltyp_CAL', 'modeltyp_ACT', 'fltstate_FI', 'fltstate_SI', 'fltstate_other',
+            "flighttype_G",
+            "flighttype_M",
+            "flighttype_N",
+            "flighttype_S",
+            "flighttype_X",
+            "actype_A20N",
+            "actype_A21N",
+            "actype_A306",
+            "actype_A318",
+            "actype_A319",
+            "actype_A320",
+            "actype_A321",
+            "actype_A332",
+            "actype_A333",
+            "actype_A339",
+            "actype_A343",
+            "actype_A359",
+            "actype_AC80",
+            "actype_ASTR",
+            "actype_AT75",
+            "actype_B350",
+            "actype_B38M",
+            "actype_B39M",
+            "actype_B733",
+            "actype_B734",
+            "actype_B735",
+            "actype_B737",
+            "actype_B738",
+            "actype_B739",
+            "actype_B744",
+            "actype_B748",
+            "actype_B752",
+            "actype_B763",
+            "actype_B772",
+            "actype_B77L",
+            "actype_B77W",
+            "actype_B788",
+            "actype_B789",
+            "actype_BCS1",
+            "actype_BCS3",
+            "actype_BE20",
+            "actype_BE40",
+            "actype_BE4W",
+            "actype_BE9L",
+            "actype_C25A",
+            "actype_C25B",
+            "actype_C25C",
+            "actype_C25M",
+            "actype_C295",
+            "actype_C30J",
+            "actype_C510",
+            "actype_C525",
+            "actype_C550",
+            "actype_C551",
+            "actype_C55B",
+            "actype_C560",
+            "actype_C56X",
+            "actype_C650",
+            "actype_C680",
+            "actype_C68A",
+            "actype_C700",
+            "actype_CL30",
+            "actype_CL35",
+            "actype_CL60",
+            "actype_CRJ2",
+            "actype_CRJ7",
+            "actype_CRJ9",
+            "actype_CRJX",
+            "actype_D328",
+            "actype_DH8D",
+            "actype_E135",
+            "actype_E145",
+            "actype_E170",
+            "actype_E190",
+            "actype_E195",
+            "actype_E290",
+            "actype_E295",
+            "actype_E35L",
+            "actype_E50P",
+            "actype_E545",
+            "actype_E550",
+            "actype_E55P",
+            "actype_E75L",
+            "actype_E75S",
+            "actype_EA50",
+            "actype_F100",
+            "actype_F2TH",
+            "actype_F900",
+            "actype_FA50",
+            "actype_FA7X",
+            "actype_FA8X",
+            "actype_G150",
+            "actype_G280",
+            "actype_GA5C",
+            "actype_GA6C",
+            "actype_GALX",
+            "actype_GL5T",
+            "actype_GL7T",
+            "actype_GLEX",
+            "actype_GLF4",
+            "actype_GLF5",
+            "actype_GLF6",
+            "actype_H25B",
+            "actype_H25C",
+            "actype_HDJT",
+            "actype_LJ35",
+            "actype_LJ40",
+            "actype_LJ45",
+            "actype_LJ55",
+            "actype_LJ60",
+            "actype_LJ75",
+            "actype_PA46",
+            "actype_PC12",
+            "actype_PC24",
+            "actype_PRM1",
+            "actype_SF50"
+            ]
+
         time_varying_columns, time_CBAS_columns, X_fixed, horizons = self._separate_features(X)
         print(f'{time_varying_columns=}')
         print(f'{self.fixed_columns=}')
@@ -58,7 +180,7 @@ class DataPreparation:
         # Step 4: Standardize time-varying features based on base feature names
         X_time_varying_scaled_df = self._scale_time_varying_features(X, time_varying_columns, fit=True)
         self.X_time_varying_scaled_df = X_time_varying_scaled_df
-        # Step 5: Build time-varying sequences and store feature mapping
+        # Step 5: Build time-varying se quences and store feature mapping
         X_time_varying_scaled, self.feature_name_to_idx = self._build_time_varying_sequences_from_df(
             X_time_varying_scaled_df, time_varying_columns, N, self.time_horizons
         )
@@ -94,9 +216,130 @@ class DataPreparation:
         return self.X_train_tensor, self.y_train_tensor, self.X_test_tensor, self.y_test_tensor, self.time_horizons, self.cbaslabels
 
     def transform_data(self, X, update_t_to_eobt_values=None, split_ratio=0.8, mode='lstm'):
+        if 'actype_B737' in X.columns.tolist():
+            print(f'inin')
+            self.binary_features = ['modeltyp_EST', 'modeltyp_CAL', 'modeltyp_ACT', 'fltstate_FI', 'fltstate_SI', 'fltstate_other',
+            "flighttype_G",
+            "flighttype_M",
+            "flighttype_N",
+            "flighttype_S",
+            "flighttype_X",
+            "actype_A20N",
+            "actype_A21N",
+            "actype_A306",
+            "actype_A318",
+            "actype_A319",
+            "actype_A320",
+            "actype_A321",
+            "actype_A332",
+            "actype_A333",
+            "actype_A339",
+            "actype_A343",
+            "actype_A359",
+            "actype_AC80",
+            "actype_ASTR",
+            "actype_AT75",
+            "actype_B350",
+            "actype_B38M",
+            "actype_B39M",
+            "actype_B733",
+            "actype_B734",
+            "actype_B735",
+            "actype_B737",
+            "actype_B738",
+            "actype_B739",
+            "actype_B744",
+            "actype_B748",
+            "actype_B752",
+            "actype_B763",
+            "actype_B772",
+            "actype_B77L",
+            "actype_B77W",
+            "actype_B788",
+            "actype_B789",
+            "actype_BCS1",
+            "actype_BCS3",
+            "actype_BE20",
+            "actype_BE40",
+            "actype_BE4W",
+            "actype_BE9L",
+            "actype_C25A",
+            "actype_C25B",
+            "actype_C25C",
+            "actype_C25M",
+            "actype_C295",
+            "actype_C30J",
+            "actype_C510",
+            "actype_C525",
+            "actype_C550",
+            "actype_C551",
+            "actype_C55B",
+            "actype_C560",
+            "actype_C56X",
+            "actype_C650",
+            "actype_C680",
+            "actype_C68A",
+            "actype_C700",
+            "actype_CL30",
+            "actype_CL35",
+            "actype_CL60",
+            "actype_CRJ2",
+            "actype_CRJ7",
+            "actype_CRJ9",
+            "actype_CRJX",
+            "actype_D328",
+            "actype_DH8D",
+            "actype_E135",
+            "actype_E145",
+            "actype_E170",
+            "actype_E190",
+            "actype_E195",
+            "actype_E290",
+            "actype_E295",
+            "actype_E35L",
+            "actype_E50P",
+            "actype_E545",
+            "actype_E550",
+            "actype_E55P",
+            "actype_E75L",
+            "actype_E75S",
+            "actype_EA50",
+            "actype_F100",
+            "actype_F2TH",
+            "actype_F900",
+            "actype_FA50",
+            "actype_FA7X",
+            "actype_FA8X",
+            "actype_G150",
+            "actype_G280",
+            "actype_GA5C",
+            "actype_GA6C",
+            "actype_GALX",
+            "actype_GL5T",
+            "actype_GL7T",
+            "actype_GLEX",
+            "actype_GLF4",
+            "actype_GLF5",
+            "actype_GLF6",
+            "actype_H25B",
+            "actype_H25C",
+            "actype_HDJT",
+            "actype_LJ35",
+            "actype_LJ40",
+            "actype_LJ45",
+            "actype_LJ55",
+            "actype_LJ60",
+            "actype_LJ75",
+            "actype_PA46",
+            "actype_PC12",
+            "actype_PC24",
+            "actype_PRM1",
+            "actype_SF50"
+            ]
 
         # Step 1: Separate time-varying and fixed features
         time_varying_columns, time_CBAS_columns, X_fixed, horizons = self._separate_features(X)
+        self.long_horizons = horizons
         print(f'{time_varying_columns=}')
         N = len(X)
         X_fixed = X_fixed.fillna(0)
@@ -148,9 +391,9 @@ class DataPreparation:
     def _separate_features(self, X):
 
         # Identify time-varying columns based on prefix and exclude CBAS columns
-        skip = ['CBAS', 'cbas', 'eobt', 'atot']#, 'wspeed', 'wdirec','wguts']
+        skip = ['CBAS', 'cbas', 'eobt', 'atot']#, 'visibility']#, 'wspeed', 'wdirec','wguts']
         print(f'{skip=}')
-        time_varying_columns = [col for col in X.columns if self.prefix in col and col not in skip]# and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col]
+        time_varying_columns = [col for col in X.columns if self.prefix in col and col not in skip]#and 'visibility' not in col]#and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col and 'visibility' not in col]
         unique_values_after_prefix = set([col.split(self.prefix)[1] for col in time_varying_columns])
         horizons = sorted(unique_values_after_prefix, key=int)
         # Identify CBAS columns (if any)
@@ -158,7 +401,7 @@ class DataPreparation:
 
         # Keep fixed columns consistent with the ones used during training
         if not self.fixed_columns:
-            self.fixed_columns = [col for col in X.columns if col not in time_varying_columns and col not in skip]# and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col]
+            self.fixed_columns = [col for col in X.columns if col not in time_varying_columns and col not in skip]#and 'visibility' not in col]# and 'wspeed' not in col and 'wdirec' not in col and 'wguts' not in col and 'visibility' not in col]
 
         X_fixed = X[self.fixed_columns].copy()  # shape: (N, num_fixed_features)
         return time_varying_columns, time_CBAS_columns, X_fixed, horizons
@@ -296,15 +539,6 @@ class DataPreparation:
         self.test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False)
 
     def inverse_transform_single_flight(self, X_scaled_single_flight):
-        """
-        Reverts the transformation for a single flight/sequence.
-
-        :param X_scaled_single_flight: Scaled and transformed data for a single flight.
-                                    Shape: (T, num_total_features)
-        :return: Original data for the single flight as a DataFrame.
-        """
-        import pandas as pd
-        import numpy as np
 
         num_fixed_features = len(self.fixed_columns)
         num_time_steps = X_scaled_single_flight.shape[0]
@@ -319,12 +553,12 @@ class DataPreparation:
         # Prepare DataFrame for time-varying features
         base_feature_names = list(self.feature_name_to_idx.keys())
         time_varying_features_df = pd.DataFrame(
-            index=self.time_horizons, columns=base_feature_names
+            index=self.long_horizons, columns=base_feature_names
         )
 
         X_time_varying_scaled = X_scaled_single_flight[:, num_fixed_features:]  # Shape: (T, num_time_varying_features)
-
-        for t_idx, t in enumerate(self.time_horizons):
+        # print(f'{self.long_horizons=}')
+        for t_idx, t in enumerate(self.long_horizons):
             for base_feature in base_feature_names:
                 feature_idx = self.feature_name_to_idx[base_feature]
                 scaled_value = X_time_varying_scaled[t_idx, feature_idx]
@@ -350,7 +584,7 @@ class DataPreparation:
 
         # Flatten the time-varying features to match original column names
         time_varying_features_flat = {}
-        for t in self.time_horizons:
+        for t in self.long_horizons:
             for base_feature in base_feature_names:
                 col_name = f"{base_feature}{self.prefix}{t}"
                 time_varying_features_flat[col_name] = time_varying_features_df.at[t, base_feature]
@@ -373,14 +607,25 @@ def map_airport_details(row, airport_dict, airport_type):
         f'{airport_type}Long': airport_info.get('longitude', None),
         f'{airport_type}Lat': airport_info.get('latitude', None),
     }
-
+ 
 
 def dummies_encode_efd(P, airport = None, save_template=True):
-    """
-    Perform dummy encoding and ensure column consistency.
-    If save_template is True, saves the dummy columns as a template for future runs.
-    """
-    if airport is None:
+    print(f'{P.columns.tolist()}')
+    print('actype' in P.columns.tolist())
+    if 'actype' in P.columns.tolist():
+        print(f'in')
+        cdm_columns = [col for col in P.columns if 'cdm' in col]
+        P = P.drop(cdm_columns, axis=1)
+        dum_cols = ["ADEP", "ADES", "day_of_week", 'flighttype','actype']
+
+        # Perform dummy encoding
+        new_df3 = pd.get_dummies(P, columns=dum_cols)
+
+        # Save the columns template for future runs
+        if save_template:
+            save_dummy_template(new_df3.columns.tolist(), DUMMY_TEMPLATE_FILE)
+
+    else:
         cdm_columns = [col for col in P.columns if 'cdm' in col]
         P = P.drop(cdm_columns, axis=1)
         dum_cols = ["ADEP", "ADES", "day_of_week"]
@@ -391,24 +636,6 @@ def dummies_encode_efd(P, airport = None, save_template=True):
         # Save the columns template for future runs
         if save_template:
             save_dummy_template(new_df3.columns.tolist(), DUMMY_TEMPLATE_FILE)
-
-    else:
-        drop_columns = ["ADES", "FiledAT", "ACType", "ArrivalDelay"]
-        new_df = P.drop(columns=[col for col in drop_columns if col in P.columns], axis=1)
-        dum_cols = ["ADEP", "ACOperator", "month", "weekday", "operator", "actype", "flighttype"]
-
-        # Perform dummy encoding
-        new_df3 = pd.get_dummies(new_df, columns=dum_cols)
-
-    # Adjust columns to match the template if it exists
-    template_columns = load_dummy_template(DUMMY_TEMPLATE_FILE)
-    if template_columns:
-        # Add missing columns with NaN
-        for col in template_columns:
-            if col not in new_df3.columns:
-                new_df3[col] = np.nan
-        # Ensure column order matches the template
-        # new_df3 = new_df3[template_columns]
 
     return new_df3
 
@@ -422,47 +649,48 @@ def time_to_circular(time_in_minutes, period=1440):
     return sin_component, cos_component
 
 
+def circular_encode(series, max_val):
+    radians = 2 * np.pi * series / max_val
+    sin = np.sin(radians)
+    cos = np.cos(radians)
+    return sin, cos
+
 
 def filtering_data(extended_df, airport='EHAM', save=False):
 
     dform = "%Y-%m-%d %H:%M:%S"
     airport2 = 'EGLL'
-    # print(df)
     df = (
-        extended_df.query("ADES== @airport ") # |ADES== @airport" / ADEP@ ==airport   & ADEP == @airport2
+        extended_df.query("ADES== @airport ")
+         .query("ADES != ADEP ") # |ADES== @airport" / ADEP@ ==airport   & ADEP == @airport2
         .assign(EOBT=lambda x: pd.to_datetime(x.EOBT, format=dform))
         .assign(ETA=lambda x: pd.to_datetime(x.ETA, format=dform))
-        .assign(day_of_week=lambda x: x.EOBT.dt.weekday)  # Add day_of_week column using .weekday() from EOBT
-        .sort_values(by='EOBT')  # Sort by FiledOBT after conversion
+        .assign(day_of_week=lambda x: x.EOBT.dt.weekday)  
+        .sort_values(by='EOBT') 
     )
+
     if 'timetoCBAS_Tmin_5' in df.columns:
         timeto_columns = [col for col in df.columns if col.startswith('timetoCBAS_Tmin_')]
 
-        # Step 2: Create a function to find the last non-NaN value for each row
         def last_valid_timedelta(row):
-            last_valid = row[timeto_columns].dropna().iloc[-1]  # Get the last non-NaN value
+            last_valid = row[timeto_columns].dropna().iloc[-1]
             return last_valid
 
-        # Step 3: Apply this function to each row and filter the rows
         df['last_timetoCBAS_Tmin_'] = df.apply(last_valid_timedelta, axis=1)
 
-        # Step 4: Filter rows where the last non-NaN timetoCBAS_Tmin_ is greater than pd.Timedelta(0)
         df = df[df['last_timetoCBAS_Tmin_'] > pd.Timedelta(0)]
 
         df = df.drop('last_timetoCBAS_Tmin_', axis=1)
     else:
         df = df[(df['timetoCBAS_Tmin_0'] > pd.Timedelta(0)) | (df['timetoCBAS_Tmin_0'].isna())]
-    # df = df[(df['timetoCBAS_Tmin_0'] > pd.Timedelta(0)) | (df['timetoCBAS_Tmin_0'].isna())]
     df = df.join(df.apply(lambda row: pd.Series(map_airport_details(row, airport_dict, 'ADEP')), axis=1))
     df = df.join(df.apply(lambda row: pd.Series(map_airport_details(row, airport_dict, 'ADES')), axis=1))
-    # print(f'df = \n{df.describe()}')
     df = df.drop(['sid', 'star'], axis =1)
     df_3 = dummies_encode_efd(df, airport=None, save_template=save)
 
 
     y = df["delay"].to_numpy()
-    # print(f'yyyyyy =')
-    df_3 = df_3.drop(['delay', 'EOBT', 'event', 'CDMStatus', 'TSAT', 'TOBT', 'taxitime', 'regulations', 'dep_status', 'atfmdelay', 'fltstate'], axis=1)
+    df_3 = df_3.drop(['delay','modeltype', 'EOBT', 'event', 'CDMStatus', 'TSAT', 'TOBT', 'taxitime', 'regulations', 'dep_status', 'atfmdelay', 'fltstate'], axis=1)
     df_3['ETOT_minutes'] = df_3['ETOT'].dt.hour * 60 + df_3['ETOT'].dt.minute
     df_3 = df_3.drop('ETOT', axis=1) 
     df_3['ETA_minutes'] = np.where(
@@ -472,19 +700,15 @@ def filtering_data(extended_df, airport='EHAM', save=False):
     )    
     df_3 = df_3.drop('ETA', axis=1)
     df_3['sin_ETOT'], df_3['cos_ETOT'] = time_to_circular(df_3['ETOT_minutes'])
-    df_3 = df_3.drop('ETOT_minutes', axis=1)  # Drop the intermediate minutes column
+    df_3 = df_3.drop('ETOT_minutes', axis=1)  
 
-    # Apply the circular transformation for ETA_minutes
     df_3['sin_ETA'], df_3['cos_ETA'] = time_to_circular(df_3['ETA_minutes'])
-    df_3 = df_3.drop('ETA_minutes', axis=1)  # Drop the intermediate minutes column
+    df_3 = df_3.drop('ETA_minutes', axis=1) 
 
-
-    #convert T/F columns to 0/1:
     bool_columns = df_3.select_dtypes(include=['bool']).columns.tolist()
     df_3[bool_columns] = df_3[bool_columns].astype(int)
 
     X_final = pd.DataFrame(df_3)
-    # X_final = pd.concat([X_final, df['EOBT']])
     return X_final, y, df_3.columns
 
 
@@ -502,57 +726,6 @@ def load_dummy_template(template_file):
             dummy_columns = pickle.load(file)
         return dummy_columns
     return None
-
-
-def process_flight_data(f, period=1440):
-    """
-    Processes flight data to extract specific information:
-    time, day, ADEP, distance, longitude, and latitude.
-    
-    Args:
-        f (DataFrame): Input data frame containing flight information.
-        period (int): The period in minutes (default 1440 for a day).
-        
-    Returns:
-        dict: Dictionary containing extracted flight data.
-    """
-    # Compute time
-    sin_component = f['sin_ETOT']
-    cos_component = f['cos_ETOT']
-    angle = np.arctan2(sin_component, cos_component)
-    angle = np.where(angle < 0, angle + 2 * np.pi, angle)
-    time_in_minutes = (angle / (2 * np.pi)) * period
-    time = time_in_minutes[0]
-    
-    # Extract day
-    daycols = f[[col for col in f.columns if 'day' in col]]
-    day = daycols.max().idxmax()
-    
-    # Extract ADEP
-    adepdf = f[[col for col in f.columns if ("ADEP_" in col and col != "ADEP_capacity")]]
-    adep = adepdf.max().idxmax()
-    
-    # Extract distance
-    distance = f['distance'][0]
-    
-    # Extract longitude
-    longitude = f['ADEPLong'][0]
-    
-    # Extract latitude
-    latitude = f['ADEPLat'][0]
-    
-    # Compile results into a dictionary
-    result = {
-        'time': time,
-        'day': day,
-        'adep': adep,
-        'distance': distance,
-        'longitude': longitude,
-        'latitude': latitude
-    }
-    
-    return result
-
 
 def load_chunks(file_prefix, chunk_size=5000):
     """Load chunks of a dictionary and combine them into a single dictionary."""
@@ -697,7 +870,6 @@ def merge(df, extended_df):
     df['FiledOBT'] = pd.to_datetime(df['FiledOBT'])
     extended_df['FiledOBT_efd'] = pd.to_datetime(extended_df['FiledOBT'])
 
-    # Identify overlapping columns (except for 'ADEP', 'ADES', and 'FiledOBT')
     common_columns = set(df.columns).intersection(set(extended_df.columns)) - {'ADEP', 'ADES', 'FiledOBT'}
     print(f"Overlapping columns: {common_columns}")
 
@@ -720,12 +892,47 @@ def merge(df, extended_df):
     # If 'FiledOBT_extended' is no longer needed, drop it
     merged_df = merged_df.drop(columns=['FiledOBT_extended', 'FiledOBT_efd', 'FiledOBT', 'id', 'FiledOBT_df'])
 
-    # View the merged dataframe
-    # print(merged_df.head())
-
-    # Check the shape of the merged dataframe
     print(f"Shape of the merged dataframe: {merged_df.shape}")
 
     # Check columns in the merged dataframe
     print(f"Columns in merged_df: {merged_df.columns.tolist()}")
     return merged_df
+
+def should_merge(other_flight_info, flight):
+    # Simplified logic to decide if flights should merge based on your conditions
+    return abs(flight.timestamp[0] - other_flight_info[2]) < timedelta(hours=3) and other_flight_info[3] == 'SU'
+# gaat het berekenen van het verschil goed?
+
+
+def merge_flights(efd_flights, update_weather=False, metar_reports=[], taf_reports=[], regulations = []):
+    atotflights = []
+    arcidlist = {}
+
+    # Pre-process to map Arcid to flight indices and prepare initial state
+    for i, (flightnr, flight) in enumerate(efd_flights.flights.items()):
+        if i % 1000 == 0:
+            print(f'process = {i, flightnr}')
+        if flight and flight.timestamp:
+            if flight.Arcid not in arcidlist:
+                arcidlist[flight.Arcid] = [flightnr, flight.timestamp[0], flight.timestamp[-1], flight.fltstate]
+            else:
+                other_flight_info = arcidlist[flight.Arcid]
+                # Assuming there's logic to decide if a merge is needed
+                if should_merge(other_flight_info, flight):
+                    efd_flights.flights[other_flight_info[0]].merge(flight)
+
+                    arcidlist[flight.Arcid] = [other_flight_info[0], efd_flights.flights[other_flight_info[0]].timestamp[0], efd_flights.flights[other_flight_info[0]].timestamp[-1], efd_flights.flights[other_flight_info[0]].fltstate]
+                    # print( f"Merged flight {other_flight_info[0]} and {flightnr}")
+                else:
+                    # Update timestamp range without merging
+                    arcidlist[flight.Arcid] = [flightnr, flight.timestamp[0], flight.timestamp[-1], flight.fltstate]
+                    arcidlist[flight.Arcid] = [flightnr, flight.timestamp[0], flight.timestamp[-1], flight.fltstate]
+    print(f'Merge process finished')
+    # Optional: Update weather data more efficiently
+    if update_weather:
+        for flight in tqdm(efd_flights.flights.values()):
+            if flight:
+                flight.update_weather_data(metar_reports, taf_reports)
+                flight.add_regulation(regulations)
+    print(f'add process finished')
+    return efd_flights

@@ -14,26 +14,7 @@ class CatBoostTrainer:
                  learning_rate=0.1, l2_leaf_reg=3, early_stopping_rounds=50, 
                  horizons=[], cv=3, n_iter=50, scoring='neg_mean_absolute_error', 
                  verbose=100, random_search=True, param_distributions=None, model_folder='catboost_models'):
-        """
-        Initializes the trainer with hyperparameters for CatBoost models and sets up the model saving directory.
-        
-        Parameters:
-            dataprep (DataPreparationRF): Instance of DataPreparationRF used during data preparation.
-            iterations (int): Number of boosting iterations.
-            random_state (int): Seed used by the random number generator.
-            depth (int): Depth of the tree.
-            learning_rate (float): Learning rate.
-            l2_leaf_reg (float): L2 regularization term on weights.
-            early_stopping_rounds (int): Number of rounds with no improvement to stop training.
-            horizons (list): List of actual horizon values corresponding to timesteps.
-            cv (int): Number of cross-validation folds for hyperparameter search.
-            n_iter (int): Number of parameter settings that are sampled in RandomizedSearchCV.
-            scoring (str): Scoring metric for hyperparameter search.
-            verbose (int): Controls the verbosity: the higher, the more messages.
-            random_search (bool): If True, use RandomizedSearchCV; else, use GridSearchCV.
-            param_distributions (dict): Dictionary with parameter names (`str`) as keys and distributions or lists of parameters to try.
-            model_folder (str): Directory path to save and load CatBoost models.
-        """
+    
         self.data_prep = dataprep
         self.models = {}  # Dictionary to store best CatBoost models per timestep
         self.best_params = {}  # Dictionary to store best parameters per timestep
@@ -72,30 +53,12 @@ class CatBoostTrainer:
                 # 'bagging_fraction': [0.6, 0.8, 1.0],
                 'feature_border_type': ['Median', 'Uniform', 'GreedyLogSum']
             }
-            self.param_distributions = {
-                'iterations': [500],
-                'depth': [4],
-                'learning_rate': [0.01],
-                'l2_leaf_reg': [1, 9],
-                'border_count': [32],
-                'bagging_temperature': [ 2],
-                'random_strength': [ 3],
-                # 'scale_pos_weight': [1, 2, 3],
-                # 'bagging_fraction': [0.6, 0.8, 1.0],
-                'feature_border_type': [ 'GreedyLogSum']
-            }
+
         else:
             self.param_distributions = param_distributions
 
     def train(self, X_train, y_train_dict, categorical_features=[]):
-        """
-        Trains a separate CatBoost model for each timestep with hyperparameter tuning and saves the models.
-        
-        Parameters:
-            X_train (numpy.ndarray): Training features with shape (samples, timesteps, features).
-            y_train_dict (dict): Dictionary with timestep as key and y_train array as value.
-            categorical_features (list): List of categorical feature indices or names.
-        """
+
         for t in range(X_train.shape[1]):
             print(f"\n--- Training CatBoost for Timestep {self.horizons[t]} ---")
             
@@ -163,17 +126,7 @@ class CatBoostTrainer:
             print(f"Saved model for Timestep {self.horizons[t]} at {model_path}")
 
     def evaluate(self, X_test, y_test_dict, categorical_features=[]):
-        """
-        Loads each CatBoost model from the folder and evaluates it on the test set, printing MSE and MAE.
-        
-        Parameters:
-            X_test (numpy.ndarray): Testing features with shape (samples, timesteps, features).
-            y_test_dict (dict): Dictionary with timestep as key and y_test array as value.
-            categorical_features (list): List of categorical feature indices or names.
-        
-        Returns:
-            y_pred_dict (dict): Dictionary with timestep as key and y_pred array as value.
-        """
+
         y_pred_dict = {}
         mae_per_timestep = {}
         
@@ -237,13 +190,7 @@ class CatBoostTrainer:
         return mae_values
 
     def plot_feature_importances(self, feature_names, top_n=20):
-        """
-        Plots feature importances for each timestep's CatBoost model.
-        
-        Parameters:
-            feature_names (list): List of feature names.
-            top_n (int): Number of top features to display.
-        """
+
         for t in range(len(self.horizons)):
             model_filename = f"catboost_{self.horizons[t]}.pkl"
             model_path = os.path.join(self.model_folder, model_filename)
@@ -277,12 +224,7 @@ class CatBoostTrainer:
 
 class CATRollingForecaster:
     def __init__(self, model_folder, data_prep, scaled_flight_features, time_horizons):
-        """
-        :param model_folder: Directory where the LightGBM models are saved.
-        :param data_prep: DataPreparation instance used during training (contains scalers).
-        :param scaled_flight_features: Transformed (scaled) features for a specific flight (numpy array).
-        :param time_horizons: List of time horizons (e.g., [-300, -295, ..., 0]).
-        """
+
         self.model_folder = model_folder
         self.data_prep = data_prep
         self.scaled_features = scaled_flight_features  # Shape: (timesteps, features)
@@ -296,26 +238,43 @@ class CATRollingForecaster:
         self.predictions = []  # Store predictions at each step
 
     def load_models(self):
-        """
-        Load the LightGBM models for each timestep.
-        Returns a dictionary with horizon as key and model as value.
-        """
+
         models = {}
+        total_nodes = 0  # Initialize total nodes counter
+
+        print("\n--- Loading CatBoost Models and Calculating Learned Parameters ---")
         for t_idx, horizon in enumerate(self.time_horizons):
             model_filename = f"catboost_{horizon}.pkl"
             model_path = os.path.join(self.model_folder, model_filename)
             if os.path.exists(model_path):
                 with open(model_path, 'rb') as f:
-                    models[horizon] = pickle.load(f)
-                # print(f"Loaded model for horizon {horizon} from {model_path}")
-            # else:
-                # print(f"Model file {model_path} not found. Skipping horizon {horizon}.")
+                    model = pickle.load(f)
+                    models[horizon] = model
+
+                # Retrieve model parameters
+                params = model.get_params()
+                iterations = params.get('iterations', 0)  # Number of trees
+                depth = params.get('depth', 0)  # Depth of each tree
+
+                # Calculate the number of nodes per tree
+                nodes_per_tree = (2 ** depth) - 1  # Binary tree node count
+                total_nodes_model = iterations * nodes_per_tree  # Total nodes for this model
+
+                print(f"Loaded model for horizon {horizon}:")
+                print(f"  - Iterations (Number of Trees): {iterations}")
+                print(f"  - Depth per Tree: {depth}")
+                print(f"  - Nodes per Tree: {nodes_per_tree}")
+                print(f"  - Total Nodes for Model: {total_nodes_model}\n")
+
+                total_nodes += total_nodes_model  # Accumulate total nodes
+            else:
+                print(f"Model file {model_path} not found. Skipping horizon {horizon}.\n")
+
+        print(f"--- Total Learned Parameters (Decision Nodes) Across All Models: {total_nodes} ---\n")
         return models
 
     def rolling_forecast(self):
-        """
-        Perform rolling forecasts using the LightGBM models.
-        """
+
         prediction = None
         num_timesteps = self.scaled_features.shape[0]
         for t in range(num_timesteps):
@@ -328,30 +287,18 @@ class CATRollingForecaster:
                 break
             def myround(x, base=5):
                 return base * round(x/base)
-            # Get the corresponding horizon
-            # print(f'{t=}')
-            # print(f'{(self.predictions[-1] if prediction else 0)=}')
-            horizon=str(max(-300, myround(-300 + 5 *t - (self.predictions[-1] if prediction else 0))))
-            # print(f'ttiltakeof = {(-300 + 5 *t - (self.predictions[-1] if prediction else 0))}')
-            # print(f'{horizon=}')
-            # Check if model exists for this horizon
-            # print(f'{self.models=}')
+
+            horizon=str(max(-300, myround(-300 + 5 *t - (np.mean(self.predictions[-5:]) if self.predictions  else 0))))
+
             if horizon not in self.models:
                 horizon = str(0)
-                # print(f"No model found for horizon {horizon}. Skipping prediction.")
 
-            # Get the model for the current horizon
             model = self.models[horizon]
 
-            # Reshape features for prediction
-            features_for_prediction = current_features.reshape(1, -1)  # Shape: (1, features)
-
-            # Make prediction
+            features_for_prediction = current_features.reshape(1, -1)  
             prediction_scaled = model.predict(features_for_prediction)
-            # Inverse transform the prediction
             prediction = self.data_prep.scaler_y.inverse_transform(prediction_scaled.reshape(-1, 1)).flatten()[0]
 
-            # Store the prediction
             self.predictions.append(prediction)
 
         return self.predictions

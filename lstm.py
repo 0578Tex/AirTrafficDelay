@@ -24,7 +24,7 @@ import plotly.express as px
 from captum.attr import IntegratedGradients
 import seaborn as sns
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
+import torch.optim.lr_scheduler as lr_scheduler  # Add this import at the top
 
 
 class MultiHeadAttention(nn.Module):
@@ -336,20 +336,7 @@ class LSTMModelTrainerAttention:
 
     
     def train_and_evaluate_model(self, params, device, l1_penalty=0.0, l2_penalty=0.0, initial_shift=2, shift_increment=1, shift_interval=10, final_shift=6, noise_std=0.0, dropout=0.3):
-        """
-        Trains and evaluates the LSTM model with dynamic sequence shifting.
 
-        :param params: Tuple containing hyperparameters
-        :param device: Device to run the model on ('cuda' or 'cpu')
-        :param l1_penalty: L1 regularization penalty
-        :param l2_penalty: L2 regularization penalty
-        :param initial_shift: Starting max_shift
-        :param shift_increment: Shift increment per interval
-        :param shift_interval: Number of epochs per shift increment
-        :param final_shift: Maximum allowed max_shift
-        :param noise_std: Standard deviation for adding noise (if applicable)
-        :return: Trained model, final training loss, final validation loss
-        """
         input_size, hidden_layer_size, output_size, num_layers, learning_rate, num_epochs, _, _, dropout = params
 
         # Initialize the model based on model_type
@@ -367,12 +354,13 @@ class LSTMModelTrainerAttention:
             ).to(device)
         else:
             raise ValueError("Invalid model_type. Choose from 'lstm', 'simpleattention', or 'varattention'.")
-
+        total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"Total trainable parameters: {total_params}")
         print(f'Start training with model {self.model_type}')
 
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=l2_penalty)
         criterion = nn.MSELoss()
-        early_stopper = EarlyStopper(patience=5, min_delta=0.001)
+        early_stopper = EarlyStopper(patience=3, min_delta=0.001)
 
         best_model_state = None
         best_val_loss = float('inf')
@@ -386,7 +374,7 @@ class LSTMModelTrainerAttention:
             running_train_loss = 0.0
 
             # Determine current max_shift based on epoch
-            current_max_shift =2
+            current_max_shift =4
             print(f"Epoch {epoch+1}: Current max_shift = {current_max_shift}")
 
             # Training loop
@@ -462,19 +450,21 @@ class LSTMModelTrainerAttention:
 
         # Close the TensorBoard writer
         self.writer.close()
+        plt.figure(figsize=(10, 6))
+        plt.plot(train_losses, label='Training Loss')
+        plt.plot(val_losses, label='Validation Loss', linestyle='--')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training and Validation Loss')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
 
         return model, avg_train_loss, best_val_loss
 
 
     def shift_sequences(self, X_batch, y_batch, max_shift):
-        """
-        Shift the sequences with a higher probability for smaller shifts and a dynamic max_shift.
 
-        :param X_batch: Input tensor of shape [batch_size, seq_len, input_size]
-        :param y_batch: Target tensor of shape [batch_size, seq_len, 1]
-        :param max_shift: Maximum number of timesteps to shift (integer)
-        :return: Tuple of (shifted_X_batch, shifted_y_batch)
-        """
         batch_size, seq_len, feature_dim = X_batch.size()
         shifted_X_batch = torch.zeros_like(X_batch)
         shifted_y_batch = torch.zeros_like(y_batch)
@@ -519,25 +509,17 @@ class LSTMModelTrainerAttention:
 
         return shifted_X_batch, shifted_y_batch
 
-#Best Params: (78, 120, 1, 5, 0.0005, 30, 2, 5), Best Val Loss: 0.3171  shift 2 - MAE +- 9.5 4 uur RT scenario
-# 6-> 0.3199
-#shift 2 8 heads begin beter?
-# Best Params: (78, 120, 1, 9, 0.001, 30, 1, 5), Best Val Loss: 0.2347
-# Params: (78, 120, 1, 11, 0.0005, 30, 1, 5), Val Loss: 0.2301
-### same ochtend?
-# Params: (80, 100, 1, 7, 0.0005, 40, 1, 5, 0.3), Val Loss: 0.2493
-# Best Params: (80, 150, 1, 11, 0.0005, 40, 1, 4, 0.3), Best Val Loss: 0.2501
 
     def hyperparameter_search(self, max_shift, output_size=1):
-        hidden_layer_sizes = [50,60,70,100]
-        num_layers_list = [3,4,5,6]
+        hidden_layer_sizes =[110]
+        num_layers_list = [5]
         learning_rates = [0.0005]
-        num_epochs_list = [40]
-        dropout=[0.2]
+        num_epochs_list = [50]
+        dropout=[0.1]
         l1_penalties = [0]
         l2_penalties = [0]
-        max_shift=[max_shift]
-        num_heads = [5]
+        max_shift=[5]
+        num_heads = [4]
 
         hyperparameter_combinations = list(itertools.product(
             [self.input_size], hidden_layer_sizes, [output_size], num_layers_list, learning_rates, num_epochs_list, max_shift, num_heads, dropout
@@ -567,7 +549,7 @@ class LSTMModelTrainerAttention:
 
         print(f"Best Params: {best_params}, Best Val Loss: {best_val_loss:.4f}")
         return best_model
-    
+
     def evaluate_and_plot(self, model, X_test_tensor, y_test_tensor, scaler_y, horizons):
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         X_test_tensor = X_test_tensor.to(device)
@@ -931,19 +913,7 @@ class LSTMModelTrainerAttention:
     
 
     def compute_permutation_importance(self, model, X_test_tensor, y_test_tensor, scaler_y, horizons, bnames, metric='mae'):
-        """
-        Compute permutation feature importance by permuting each feature at each timestep
-        and measuring the increase in model error.
 
-        :param model: Trained model
-        :param X_test_tensor: Test features tensor, shape [N, T, F]
-        :param y_test_tensor: Test targets tensor, shape [N, T, 1]
-        :param scaler_y: Scaler used for target variable
-        :param horizons: List of time horizons
-        :param bnames: List of feature names
-        :param metric: Performance metric to use ('mae' or 'mse')
-        :return: DataFrame containing feature importance scores
-        """
         import copy
         from tqdm import tqdm
         import pandas as pd
@@ -1016,29 +986,64 @@ class LSTMModelTrainerAttention:
         importance_df = importance_df.astype(float)
 
         return importance_df
+    
 
-    def plot_permutation_importance(self, importance_df):
+    def plot_permutation_importance(self, importance_df, top_n=10):
         """
-        Plot the permutation feature importance as a heatmap.
+        Plot the permutation feature importance as a stacked area plot with relative importance percentages.
 
         :param importance_df: DataFrame containing feature importance scores
+        :param top_n: Number of top features to display in the plot
         """
         import matplotlib.pyplot as plt
-        import seaborn as sns
+        import numpy as np
+        import pandas as pd
 
-        plt.figure(figsize=(20, 15))
-        sns.heatmap(
-            importance_df,
-            cmap='viridis',
-            cbar_kws={'label': 'Increase in MAE'},
-            linewidths=.5
-        )
+        # Sum the importance over all timesteps for each feature
+        importance_df['total_importance'] = importance_df.sum(axis=1)
+        
+        # Select the top N features based on total importance
+        top_features = importance_df.sort_values('total_importance', ascending=False).head(top_n).index
+        importance_df_top = importance_df.loc[top_features]
+        
+        # Sum the importance of all other features
+        other_features = importance_df.index.difference(top_features)
+        importance_df_other = importance_df.loc[other_features].drop('total_importance', axis=1)
+        importance_df_other = pd.DataFrame(importance_df_other.sum(axis=0)).T
+        importance_df_other.index = ['Other']
+        
+        # Combine the top features and 'Other'
+        importance_df_top = importance_df_top.drop('total_importance', axis=1)
+        importance_df_combined = pd.concat([importance_df_top, importance_df_other])
+        
+        # Compute total importance per timestep
+        total_importance_per_timestep = importance_df_combined.sum(axis=0)
+        
+        # Avoid division by zero
+        total_importance_per_timestep[total_importance_per_timestep == 0] = 1e-8
+        
+        # Compute relative importance percentages per timestep
+        importance_df_relative = importance_df_combined.divide(total_importance_per_timestep, axis=1) * 100
+
+        # Prepare data for stacking
+        timesteps = importance_df_relative.columns.astype(float)
+        features = importance_df_relative.index
+        importance_values = importance_df_relative.values
+
+        # Sort timesteps in case they're not in order
+        sorted_indices = np.argsort(timesteps)
+        timesteps = timesteps[sorted_indices]
+        importance_values = importance_values[:, sorted_indices]
+        
+        # Plot stacked area chart
+        plt.figure(figsize=(12, 8))
+        plt.stackplot(timesteps, importance_values, labels=features)
+        
         plt.xlabel('Timestep')
-        plt.ylabel('Feature')
-        plt.title('Permutation Feature Importance Over Time Steps')
+        plt.ylabel('Relative Importance (%)')
+        plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1), borderaxespad=0.)
         plt.tight_layout()
         plt.show()
-
 
     def plot_permutation_importance_with_highlights_interactive(self, importance_df, highlight_features):
         """
@@ -1114,13 +1119,7 @@ class LSTMModelTrainerAttention:
 
 class LSTMRollingForecaster:
     def __init__(self, model, data_prep, scaled_flight_features, time_horizons, device='cuda'):
-        """
-        :param model: Trained LSTM model
-        :param data_prep: DataPreparation instance used during training
-        :param scaled_flight_features: Transformed (scaled) features for a specific flight (tensor)
-        :param time_horizons: List of time horizons
-        :param device: Device to run the model on ('cuda' or 'cpu')
-        """
+
         self.model = model.to(device)
         self.data_prep = data_prep
         self.scaled_features = scaled_flight_features.unsqueeze(0)  # Add batch dimension
@@ -1180,11 +1179,8 @@ class LSTMRollingForecaster:
             # Set current features based on the prepared indices
             self.current_features = self.scaled_features[:, indices, :]
 
-
         return True
     
-    
-
     def rolling_forecast(self):
 
         predictions = []
@@ -1205,7 +1201,7 @@ class LSTMRollingForecaster:
                 self.start_time_index = self.data_time_index
             else:
                 # if  int(np.average(predictions[-1:])/5) >= self.start_time_index:
-                self.start_time_index = int(np.round(np.average(predictions[-1:])/5,0)  ) 
+                self.start_time_index = int(np.round(np.average(predictions[-5:])/5,0)  ) 
 
             current_horizon -= 5  # Decrement current horizon
 

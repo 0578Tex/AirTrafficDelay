@@ -13,19 +13,15 @@ columns = ['segment_identifier', 'flight_origin', 'flight_destination', 'aircraf
            'time_begin', 'time_end', 'fl_begin', 'fl_end', 'status', 'callsign', 
            'date_begin', 'date_end', 'lat_begin', 'lon_begin', 'lat_end', 'lon_end',
            'flight_identifier', 'sequence', 'length', 'parity']
-
 # Function to convert the custom date format in SO6 files
 def convert_so6_time(df, date_col, time_col):
     combined_str = df[date_col] + df[time_col]
     return pd.to_datetime(combined_str, format='%y%m%d%H%M%S', errors='coerce')
 
-# Function to optimize data types for memory efficiency
 def optimize_data_types(df):
-    # Convert object types (strings) to categories if there are few unique values
     for col in ['flight_origin', 'flight_destination', 'aircraft_type', 'callsign', 'status']:
         df[col] = df[col].astype('category')
 
-    # Convert numeric columns to appropriate types
     df['lat_begin'] = pd.to_numeric(df['lat_begin'], errors='coerce', downcast='float')
     df['lon_begin'] = pd.to_numeric(df['lon_begin'], errors='coerce', downcast='float')
     df['lat_end'] = pd.to_numeric(df['lat_end'], errors='coerce', downcast='float')

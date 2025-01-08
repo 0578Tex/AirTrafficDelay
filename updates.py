@@ -9,7 +9,8 @@ def get_minimum_turnaround_time(type):
         return timedelta(minutes=public_airliners_turnaround_times[type])
     return timedelta(minutes = 45)
 
-def get_knock_on_delay_oud(flight, current_time):
+
+def get_knock_on_delay(flight, current_time):
     """
     Calculates the knock-on delay from the previous flight using the same aircraft.
     """
@@ -24,7 +25,7 @@ def get_knock_on_delay_oud(flight, current_time):
 
         # Get the latest known arrival time of the previous flight
         # Prefer actual arrival time, then estimated arrival time
-        prev_ata = prev_flight.actual.get('ATA')
+        prev_ata = prev_flight.latest.get('ATA')
         prev_eta = prev_flight.latest.get('ETA')
         
         # Determine the best available arrival time
@@ -61,62 +62,6 @@ def get_knock_on_delay_oud(flight, current_time):
         return knock_on_delay_minutes
     else: 
         # No previous flight; no knock-on delay
-        return 0
-    
-def get_knock_on_delay(flight, current_time):
-    """
-    Calculates the knock-on delay from the previous flight using the same aircraft.
-    """
-    try:    
-        if flight.prev and not isinstance(flight.prev, float):
-            prev_flight = flight.prev
-            prev_flight.get_states()
-            prev_flight.get_latest(current_time)
-            
-            # Get the minimum turnaround time
-            minimum_turnaround = get_minimum_turnaround_time(flight.aircrafttype) #timedelta(minutes=45)
-            # aircrafyt type specificeren
-
-            # Get the latest known arrival time of the previous flight
-            # Prefer actual arrival time, then estimated arrival time
-            prev_ata = prev_flight.latest.get('ATA')
-            prev_eta = prev_flight.latest.get('ETA')
-            
-            # Determine the best available arrival time
-            arrival_time = prev_ata or prev_eta
-            
-            if arrival_time is None:
-                # If we have no arrival time, check if the previous flight has departed
-                prev_atot = prev_flight.latest.get('ATOT') or prev_flight.latest.get('ETOT')
-                if prev_atot is None:
-                    # Previous flight hasn't departed yet; estimate duration
-                    estimated_duration = prev_flight.filed.get('ETA') - prev_flight.filed.get('EOBT')
-                    if estimated_duration is None:
-                        # As a fallback, use average flight duration or zero
-                        estimated_duration = timedelta(hours=1)  # Default to 1 hour
-                    arrival_time = prev_atot + estimated_duration
-                else:
-                    arrival_time = prev_flight.latest.get('ETA')
-                
-            
-            # Calculate the expected aircraft ready time
-            expected_ready_time = arrival_time + minimum_turnaround
-            
-            # Get the scheduled departure time of the current flight
-            scheduled_departure = flight.filed.get('EOBT')
-            
-            if scheduled_departure is None:
-                return 0  # Cannot calculate without scheduled departure time
-            
-            # Calculate knock-on delay
-            knock_on_delay_seconds = (expected_ready_time - scheduled_departure).total_seconds()
-            knock_on_delay_minutes = max(0, knock_on_delay_seconds / 60)  # Ensure non-negative
-            
-            return knock_on_delay_minutes
-        else: 
-            # No previous flight; no knock-on delay
-            return 0
-    except:
         return 0
     
 def encode_visibility(taf):
@@ -183,8 +128,7 @@ def extract_features(flight, current_time, dt, prev):
     cobt = flight.latest['COBT']
     cobt_delay = (cobt - fEOBT).total_seconds() /60 if fEOBT and cobt else 0
     eflighttime = (flight.latest['ETA'] - fEOBT).total_seconds()/60  if fEOBT and flight.latest['ETA'] else 0
-    ko = get_knock_on_delay_oud(flight, current_time)
-    # ko2 = get_knock_on_delay(flight, current_time)
+    ko = get_knock_on_delay(flight, current_time)
 
     ddistance, tdistance = encode_visibility(flight.AdepTAF)
     sdict, ddict, gdict, strend, dtrend, gtrend = encode_wind(flight.AdepTAF)
@@ -213,15 +157,12 @@ def extract_features(flight, current_time, dt, prev):
     return {
         # f'ko_{dt}': ko,
         f't_to_atot_Tmin_{dt}': t_to_atot,
-        # f'eta_min_Tmin_{dt}': eta_min,
-        # f'updates_Tmin_{dt}': updates,
         f'atfmdelay_Tmin_{dt}': atfmdelay,
         f'regulations_Tmin_{dt}': regulations,
         f'cobt_delay_Tmin_{dt}': cobt_delay,
         f'eflighttime_Tmin_{dt}': eflighttime,
         f'visibility_Tmin_{dt}': tdistance,
         f'ko_Tmin_{dt}': ko,
-        # f'ko2_Tmin_{dt}': ko2,
         f'TSATdelay_Tmin_{dt}': TSATdelay,
         f'TOBTdelay_Tmin_{dt}': TOBTdelay,
         f'etodepdelay_Tmin_{dt}': etodepdelay,
@@ -255,11 +196,12 @@ def extend_with_horizon_updates(flight, start_time, dt=timedelta(minutes=30), ca
     fixed_features['cap_DEP'] = match_capacity(reobt, fixed_features['ADEP'], cap = cap)
     reta = round_to_nearest_15_minutes(fixed_features['ETA'])
     fixed_features['cap_DES'] = match_capacity(reta, fixed_features['ADES'], cap=cap)
-
+    
     fixed_features['delay'] = flight.delay
 
-
-    del fixed_features['modeltype']
+    fixed_features['actype'] = flight.aircrafttype
+    fixed_features['flighttype'] = flight.flighttype
+    # del fixed_features['modeltype']
 
     dynamic_features_over_time = fixed_features  # Collect dynamic features for each time step
 
@@ -274,10 +216,7 @@ def extend_with_horizon_updates(flight, start_time, dt=timedelta(minutes=30), ca
         if mode == 'etot':
             dt_minutes = (current_time - flight.filed['ETO_DEP']).total_seconds() / 60
 
-        # print(f'{dt_minutes=}')
-        # print(f'{current_time=}')
-        # print(f'{flight.filed['ETO_DEP']=}')
-        # print(f'{dt_minutes-flight.delay=}')
+
         timestep_features = extract_features(flight, current_time, dt_minutes, prev)
         prev = timestep_features
         dynamic_features_over_time.update(timestep_features)  # Append dynamic features
